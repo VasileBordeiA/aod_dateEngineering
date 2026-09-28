@@ -138,16 +138,17 @@ Pin these at **M0** (exact tags and versions, never `latest`). Record the chosen
 
 | Component | Version | Verified on |
 |---|---|---|
-| Redpanda (`redpandadata/redpanda`) | TBD at M0 | |
-| Redpanda Console | TBD | |
-| ClickHouse (`clickhouse/clickhouse-server`, prefer an LTS) | TBD | |
-| Grafana OSS + `grafana-clickhouse-datasource` | TBD | |
-| Caddy 2 | TBD | |
-| Python / uv | 3.12 / TBD | |
-| quixstreams | TBD (≥ 3.x) | |
-| confluent-kafka, clickhouse-connect, fastapi, openai, sqlglot | TBD | |
-| Node / pnpm / Next.js | TBD | |
-| Ollama + chosen model tag | TBD after eval | |
+| Redpanda (`redpandadata/redpanda`) | v26.2.3 | 2026-09-28 |
+| Redpanda Console | v3.12.0 | 2026-09-28 |
+| ClickHouse (`clickhouse/clickhouse-server`, 26.3 LTS) | 26.3.34 | 2026-09-28 |
+| Grafana OSS + `grafana-clickhouse-datasource` | 12.4.3 + 4.21.3 | 2026-09-28 |
+| Caddy 2 | 2.11.4-alpine | 2026-09-28 |
+| Python / uv | 3.12 / 0.11.13 | 2026-09-28 |
+| quixstreams | 3.26.0 | 2026-09-28 |
+| confluent-kafka, clickhouse-connect, pyarrow, duckdb | 2.15.1, 1.9.0, 25.0.1, 1.5.5 | 2026-09-28 |
+| fastapi, openai, sqlglot | pin at M3 | |
+| Node / pnpm / Next.js | pin at M3 | |
+| Ollama + chosen model tag | 0.30.8 + TBD after eval (M3) | |
 
 ## 10. What we deliberately don't do
 - No schema registry, Avro, or Protobuf. JSON plus JSON Schema contracts is more readable on screen ([DECISIONS](DECISIONS.md) ADR-006).

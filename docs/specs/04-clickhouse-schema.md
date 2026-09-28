@@ -304,8 +304,8 @@ COMMENT 'Operator-only log of agent questions. NOT visible to the agent.';
       <readonly>1</readonly>
       <max_execution_time>5</max_execution_time>
       <timeout_overflow_mode>throw</timeout_overflow_mode>
-      <max_result_rows>500</max_result_rows>
-      <result_overflow_mode>break</result_overflow_mode>
+      <max_result_rows>5000</max_result_rows>
+      <result_overflow_mode>throw</result_overflow_mode>
       <max_rows_to_read>100000000</max_rows_to_read>
       <max_memory_usage>1000000000</max_memory_usage>
       <max_threads>2</max_threads>
@@ -398,7 +398,8 @@ The Stand Health dashboard (spec 05) queries `system.parts`, `system.query_log` 
 3. As `agent_ro`:
    - `INSERT`, `ALTER`, `DROP`, `CREATE`, `SET max_execution_time=100`, `SELECT … SETTINGS max_result_rows=10000`, `SELECT * FROM taxi.agent_log`, and `SELECT * FROM system.users` **all fail**.
    - `SELECT count() FROM taxi.trips a CROSS JOIN taxi.trips b` fails with a timeout or limit error within 6 s.
-   - `SELECT number FROM numbers(10000)` returns at most 500 rows.
+   - `SELECT number FROM numbers(10000)` fails with `TOO_MANY_ROWS_OR_BYTES`, and 500 rows still work.
+   - The cap is `max_result_rows=5000` with `throw`: `break` only checks per block (it let 10 000 rows through), and clickhouse-connect reads about 1.5 k rows of `system.settings` when it connects. The agent's normal limit is the SQL guard's `LIMIT 200` (spec 06). This is only the hard wall.
 4. Every column of every agent-whitelisted **table** has a non-empty comment. Check with `SELECT table, name FROM system.columns WHERE database='taxi' AND comment=''` (excluding `agent_log`, `trace_events_queue`, and the `sim_now` view, whose three columns are documented in its table `COMMENT`).
 5. A checkpoint produced to `trace.checkpoints` shows up in `taxi.trace_events` within 10 s.
 6. `SELECT * FROM taxi.sim_now` returns in < 50 ms with 4 M rows.

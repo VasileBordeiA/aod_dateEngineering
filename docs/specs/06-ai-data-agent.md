@@ -45,7 +45,7 @@ sequenceDiagram
         API->>LLM: tool error: reason
     else guard ok
         API-->>UI: event: sql
-        API->>CH: execute (readonly, 5 s, 500 rows)
+        API->>CH: execute (readonly, 5 s, LIMIT 200)
         alt ClickHouse error (max 2 repairs)
             CH-->>API: error
             API-->>UI: event: status "Fixing its own query…"

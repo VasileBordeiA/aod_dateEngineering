@@ -7,8 +7,8 @@
             <readonly>1</readonly>
             <max_execution_time>5</max_execution_time>
             <timeout_overflow_mode>throw</timeout_overflow_mode>
-            <max_result_rows>500</max_result_rows>
-            <result_overflow_mode>break</result_overflow_mode>
+            <max_result_rows>5000</max_result_rows>
+            <result_overflow_mode>throw</result_overflow_mode>
             <max_rows_to_read>100000000</max_rows_to_read>
             <max_memory_usage>1000000000</max_memory_usage>
             <max_threads>2</max_threads>
