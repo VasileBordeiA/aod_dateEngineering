@@ -40,21 +40,28 @@ def _function_name(node: exp.Func) -> str:
 
 
 def _visible_cte_names(table: exp.Table) -> set[str]:
-    """CTE names an enclosing WITH makes visible to `table`, honouring scope.
+    """CTE names an enclosing WITH makes visible to `table`, honouring scope: backward-only.
 
-    Walk `table`'s ancestors. Each ancestor Select/SetOperation that carries a "with_" arg
-    contributes its (non-scalar) CTE names — siblings are mutually visible regardless of
-    declaration order, since ClickHouse resolves forward references within one WITH clause
-    (verified empirically: `WITH a AS (SELECT * FROM nope), nope AS (SELECT 1 AS x) SELECT * FROM
-    a` returns 1, not "unknown table nope") — EXCEPT a CTE that is itself an ancestor of `table`
-    (i.e. `table` sits inside that very CTE's own defining subquery). A non-recursive CTE's
-    self-reference resolves to the real table of that name, not to the CTE — so it must not be
-    exempted here.
+    Inside the body of CTE i of a WITH, only CTEs 0..i-1 of that same WITH are visible — never
+    CTE i itself (a non-recursive self-reference resolves to the real table), and never a later
+    sibling. The query body that owns the WITH (i.e. `table` is not nested inside any of that
+    WITH's own CTEs) sees all of that WITH's non-scalar CTEs. Outer WITHs apply the same rule at
+    their own level, so we walk `table`'s full ancestor chain, applying this per level.
+
+    This is deliberately stricter than ClickHouse's own forward-reference resolution (verified
+    empirically: ClickHouse resolves `WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x FROM trips)
+    SELECT * FROM a` by looking b up even though it's declared after a — and, more importantly,
+    resolves an indirect cycle like `WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM
+    agent_log) SELECT * FROM agent_log` back to the REAL agent_log table, not a CTE, because a
+    non-recursive CTE can only see names declared strictly before it). Backward-only visibility
+    makes such indirect self-reference cycles impossible by construction: any table mentioned
+    inside CTE 0's body can never resolve to a CTE (0..i-1 is empty for i=0), so it must be a real,
+    whitelisted table.
 
     A *scalar* CTE (`WITH <expr> AS name`, `cte.args["scalar"]`) is a ClickHouse expression
     alias, not a relation: `WITH 1 AS x SELECT * FROM x` errors "unknown table x" when no real
     table x exists, and resolves to the real table when one does (verified empirically). Its name
-    must never be treated as a visible table.
+    is never included, at any position.
     """
     ancestors: list[object] = []
     node = table.parent
@@ -69,11 +76,14 @@ def _visible_cte_names(table: exp.Table) -> set[str]:
         with_ = ancestor.args.get("with_")
         if with_ is None:
             continue
-        for cte in with_.expressions:
+        ctes = with_.expressions
+        owning_index = next((i for i, cte in enumerate(ctes) if id(cte) in in_scope), None)
+        # None: `table` isn't nested inside any of this WITH's own CTEs, so it's in the body that
+        # owns the WITH, which sees all of them. Otherwise: only the strictly earlier siblings.
+        visible = ctes if owning_index is None else ctes[:owning_index]
+        for cte in visible:
             if cte.args.get("scalar"):
                 continue  # an expression alias, not a table — never a valid FROM target
-            if id(cte) in in_scope:
-                continue  # table is inside this CTE's own body: self-reference, not a mention
             names.add(cte.alias_or_name.lower())
     return names
 

@@ -58,6 +58,24 @@ ATTACKS = [
     # `FROM agent_log` here can only ever resolve to the real, forbidden table.
     "WITH 1 AS agent_log SELECT * FROM agent_log",
     "WITH (SELECT 1) AS agent_log SELECT * FROM agent_log",
+    # fix round 3: CTE visibility is backward-only (inside CTE i's body, only CTEs 0..i-1 of that
+    # WITH are visible — never i itself, never a later sibling), so cycles through siblings are
+    # impossible by construction. Round 2 wrongly modelled siblings as mutually visible: verified
+    # as agent_ro that ClickHouse actually resolves an indirect self-reference like this back to
+    # the REAL table (`WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM agent_log)
+    # SELECT * FROM agent_log` returns a real taxi.agent_log row/header, not a CTE), because a
+    # non-recursive CTE can only see names declared strictly before it.
+    "WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
+    "WITH b AS (SELECT * FROM agent_log), agent_log AS (SELECT * FROM b) SELECT * FROM agent_log",
+    "WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM c), c AS (SELECT * FROM agent_log) "
+    "SELECT * FROM agent_log",
+    # A plain forward reference (no cycle) is also rejected under backward-only visibility: CTE 0's
+    # body can never see any CTE of its own WITH, so a non-whitelisted forward-referenced name can
+    # only be the real (forbidden) table or an unknown one. This is a deliberately stricter policy
+    # than ClickHouse's own resolution (which does find b here) — the model just gets a repairable
+    # error instead.
+    "WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT 1) SELECT * FROM a",
+    "WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x FROM trips) SELECT * FROM a",
 ]
 
 MUST_PASS = [
@@ -75,20 +93,9 @@ MUST_PASS = [
     "select count() from TAXI.TRIPS",
     "SELECT count() FROM taxi.trips;",
     "SELECT 1 UNION ALL SELECT 2",
-    # fix round 2: sibling CTEs in one WITH are mutually visible regardless of declaration order.
-    # Verified on the running ClickHouse with a name that is not a real table:
-    #   WITH a AS (SELECT * FROM nope), nope AS (SELECT 1 AS x) SELECT * FROM a  ->  returns 1
-    # (a bare `SELECT * FROM nope` on its own raises UNKNOWN_TABLE, so this is not a real table
-    # being reached; the forward reference to the sibling CTE resolves first). A plain backward
-    # reference must of course still pass too.
+    # CTE visibility is backward-only (see sql_guard._visible_cte_names): a plain backward
+    # reference — CTE b's body referencing the earlier sibling a — must pass.
     "WITH a AS (SELECT 1 AS x FROM trips), b AS (SELECT * FROM a) SELECT * FROM b",
-    "WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x FROM trips) SELECT * FROM a",
-    # Same mechanism with the forbidden name itself: verified directly against ClickHouse
-    # (`--database taxi`) that `WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT 1 AS x)
-    # SELECT * FROM a` returns column `x` with value 1 — i.e. it resolves to the sibling CTE, not
-    # to the real (0-row) taxi.agent_log table, even though a real table of that name exists. The
-    # query never reads agent_log; ClickHouse's own name resolution makes this safe.
-    "WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT 1) SELECT * FROM a",
     # fix round 2: a WITH attached to a UNION is visible to every branch, not just the leftmost.
     # Verified on the running ClickHouse with a non-existent name:
     #   WITH nope AS (SELECT 1 AS a) SELECT * FROM nope UNION ALL SELECT * FROM nope  ->  1 \n 1
