@@ -1,0 +1,82 @@
+<clickhouse>
+    <profiles>
+        <ingest>
+            <max_memory_usage>1000000000</max_memory_usage>
+        </ingest>
+        <agent>
+            <readonly>1</readonly>
+            <max_execution_time>5</max_execution_time>
+            <timeout_overflow_mode>throw</timeout_overflow_mode>
+            <max_result_rows>500</max_result_rows>
+            <result_overflow_mode>break</result_overflow_mode>
+            <max_rows_to_read>100000000</max_rows_to_read>
+            <max_memory_usage>1000000000</max_memory_usage>
+            <max_threads>2</max_threads>
+            <max_query_size>20000</max_query_size>
+            <allow_introspection_functions>0</allow_introspection_functions>
+        </agent>
+        <grafana>
+            <readonly>2</readonly>
+            <max_execution_time>15</max_execution_time>
+            <max_memory_usage>1000000000</max_memory_usage>
+            <max_threads>2</max_threads>
+            <constraints>
+                <max_execution_time><max>30</max></max_execution_time>
+                <max_memory_usage><max>1000000000</max></max_memory_usage>
+                <max_threads><max>4</max></max_threads>
+            </constraints>
+        </grafana>
+    </profiles>
+    <quotas>
+        <agent>
+            <interval>
+                <duration>60</duration>
+                <queries>120</queries>
+                <errors>60</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>120</execution_time>
+            </interval>
+        </agent>
+    </quotas>
+    <users>
+        <!-- Ports are published on 127.0.0.1 only, so ::/0 means "the Compose network + this laptop". -->
+        <ingest_writer>
+            <password from_env="CLICKHOUSE_INGEST_PASSWORD"/>
+            <profile>ingest</profile>
+            <quota>default</quota>
+            <networks><ip>::/0</ip></networks>
+            <grants>
+                <query>GRANT INSERT ON taxi.trips</query>
+                <query>GRANT INSERT ON taxi.trips_rejected</query>
+                <query>GRANT INSERT ON taxi.agg_borough_minute</query>
+                <query>GRANT INSERT ON taxi.agent_log</query>
+            </grants>
+        </ingest_writer>
+        <agent_ro>
+            <password from_env="CLICKHOUSE_AGENT_PASSWORD"/>
+            <profile>agent</profile>
+            <quota>agent</quota>
+            <networks><ip>::/0</ip></networks>
+            <grants>
+                <query>GRANT SELECT ON taxi.trips</query>
+                <query>GRANT SELECT ON taxi.trips_rejected</query>
+                <query>GRANT SELECT ON taxi.agg_borough_minute</query>
+                <query>GRANT SELECT ON taxi.zones</query>
+                <query>GRANT SELECT ON taxi.sim_now</query>
+                <query>GRANT SELECT ON taxi.trace_events</query>
+            </grants>
+        </agent_ro>
+        <grafana_ro>
+            <password from_env="CLICKHOUSE_GRAFANA_PASSWORD"/>
+            <profile>grafana</profile>
+            <quota>default</quota>
+            <networks><ip>::/0</ip></networks>
+            <grants>
+                <query>GRANT SELECT ON taxi.*</query>
+                <query>GRANT SELECT ON system.parts</query>
+                <query>GRANT SELECT ON system.query_log</query>
+            </grants>
+        </grafana_ro>
+    </users>
+</clickhouse>

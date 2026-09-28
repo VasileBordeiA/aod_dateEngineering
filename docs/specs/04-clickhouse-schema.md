@@ -399,7 +399,7 @@ The Stand Health dashboard (spec 05) queries `system.parts`, `system.query_log` 
    - `INSERT`, `ALTER`, `DROP`, `CREATE`, `SET max_execution_time=100`, `SELECT … SETTINGS max_result_rows=10000`, `SELECT * FROM taxi.agent_log`, and `SELECT * FROM system.users` **all fail**.
    - `SELECT count() FROM taxi.trips a CROSS JOIN taxi.trips b` fails with a timeout or limit error within 6 s.
    - `SELECT number FROM numbers(10000)` returns at most 500 rows.
-4. Every column of every agent-whitelisted table has a non-empty comment. Check with `SELECT table, name FROM system.columns WHERE database='taxi' AND comment=''` (excluding `agent_log` and `trace_events_queue`).
+4. Every column of every agent-whitelisted **table** has a non-empty comment. Check with `SELECT table, name FROM system.columns WHERE database='taxi' AND comment=''` (excluding `agent_log`, `trace_events_queue`, and the `sim_now` view, whose three columns are documented in its table `COMMENT`).
 5. A checkpoint produced to `trace.checkpoints` shows up in `taxi.trace_events` within 10 s.
 6. `SELECT * FROM taxi.sim_now` returns in < 50 ms with 4 M rows.
 
