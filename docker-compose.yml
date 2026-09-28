@@ -116,6 +116,29 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  replayer:
+    build: services/replayer
+    env_file: [.env]
+    environment:
+      DATA_DIR: /data
+      KAFKA_BROKERS: redpanda:9092
+      TZ: UTC
+    depends_on:
+      redpanda-init: { condition: service_completed_successfully }
+    ports: ["127.0.0.1:8001:8001"]
+    volumes:
+      - ./data/replay:/data/replay:ro
+      - replayer-state:/data/state
+    healthcheck:
+      test: ["CMD", "python", "-m", "replayer.health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *logging
+
 volumes:
   redpanda-data:
   clickhouse-data:
