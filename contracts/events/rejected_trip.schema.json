@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nyc-taxi-live.local/contracts/events/rejected_trip.schema.json",
+  "title": "Rejected trip (topic: trips.rejected, table: taxi.trips_rejected)",
+  "description": "A trip that failed one or more validation rules. This is the dead-letter record. The original message is kept verbatim in `payload`, so nothing is lost.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["trip_id", "source", "trace_id", "pickup_ts", "reasons", "payload", "rejected_at"],
+  "properties": {
+    "trip_id": { "type": "string" },
+    "source": { "type": "string", "enum": ["replay", "student"] },
+    "trace_id": { "oneOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+    "pickup_ts": {
+      "description": "Copied from the input if it is parseable, otherwise null.",
+      "oneOf": [
+        { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?$" },
+        { "type": "null" }
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/reason_code" }
+    },
+    "payload": { "type": "string", "description": "Original trips.raw message as a JSON string." },
+    "rejected_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" }
+  },
+  "$defs": {
+    "reason_code": {
+      "type": "string",
+      "description": "See docs/specs/03-stream-processor.md, section Validation rules.",
+      "enum": [
+        "SCHEMA_INVALID",
+        "FARE_NON_POSITIVE",
+        "TOTAL_NEGATIVE",
+        "DISTANCE_NON_POSITIVE",
+        "DISTANCE_TOO_LONG",
+        "DROPOFF_NOT_AFTER_PICKUP",
+        "DURATION_TOO_LONG",
+        "LOCATION_INVALID",
+        "PASSENGER_COUNT_INVALID",
+        "TIP_NEGATIVE",
+        "TIP_UNREALISTIC"
+      ]
+    }
+  },
+  "examples": [
+    {
+      "trip_id": "r0-000200017",
+      "source": "replay",
+      "trace_id": null,
+      "pickup_ts": "2025-10-07T09:01:12",
+      "reasons": ["FARE_NON_POSITIVE", "TOTAL_NEGATIVE"],
+      "payload": "{\"trip_id\":\"r0-000200017\",\"fare_amount\":-12.5,\"total_amount\":-16.0}",
+      "rejected_at": "2026-10-16T08:03:01.200Z"
+    },
+    {
+      "trip_id": "s-3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f",
+      "source": "student",
+      "trace_id": "3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f",
+      "pickup_ts": "2025-10-09T17:42:00",
+      "reasons": ["TIP_UNREALISTIC"],
+      "payload": "{\"trip_id\":\"s-3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f\",\"tip_amount\":999}",
+      "rejected_at": "2026-10-16T10:31:07.311Z"
+    }
+  ]
+}

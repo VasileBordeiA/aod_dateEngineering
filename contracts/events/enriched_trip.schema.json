@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nyc-taxi-live.local/contracts/events/enriched_trip.schema.json",
+  "title": "Enriched trip (topic: trips.enriched, table: taxi.trips)",
+  "description": "A trip that passed validation, with zone lookup and derived fields added. It contains every field of trip.schema.json plus the fields below. Every column of taxi.trips maps 1:1 to a field here, except stored_at, which ClickHouse sets.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "trip.schema.json#/$defs/trip_fields"
+    }
+  ],
+  "required": [
+    "pu_zone",
+    "pu_borough",
+    "pu_service_zone",
+    "do_zone",
+    "do_borough",
+    "do_service_zone",
+    "payment_type_name",
+    "is_card",
+    "is_airport",
+    "duration_min",
+    "avg_speed_mph",
+    "tip_pct",
+    "pickup_hour",
+    "pickup_dow",
+    "processed_at"
+  ],
+  "properties": {
+    "pu_zone": {
+      "type": "string",
+      "description": "e.g. 'Midtown Center'. 'Unknown' for ids 264/265."
+    },
+    "pu_borough": {
+      "type": "string",
+      "enum": [
+        "Manhattan",
+        "Brooklyn",
+        "Queens",
+        "Bronx",
+        "Staten Island",
+        "EWR",
+        "Unknown",
+        "N/A"
+      ]
+    },
+    "pu_service_zone": {
+      "type": "string",
+      "enum": [
+        "Yellow Zone",
+        "Boro Zone",
+        "Airports",
+        "EWR",
+        "N/A",
+        "Unknown"
+      ]
+    },
+    "do_zone": {
+      "type": "string"
+    },
+    "do_borough": {
+      "type": "string",
+      "enum": [
+        "Manhattan",
+        "Brooklyn",
+        "Queens",
+        "Bronx",
+        "Staten Island",
+        "EWR",
+        "Unknown",
+        "N/A"
+      ]
+    },
+    "do_service_zone": {
+      "type": "string",
+      "enum": [
+        "Yellow Zone",
+        "Boro Zone",
+        "Airports",
+        "EWR",
+        "N/A",
+        "Unknown"
+      ]
+    },
+    "payment_type_name": {
+      "type": "string",
+      "enum": [
+        "Flex Fare",
+        "Credit card",
+        "Cash",
+        "No charge",
+        "Dispute",
+        "Unknown",
+        "Voided trip"
+      ]
+    },
+    "is_card": {
+      "type": "boolean",
+      "description": "payment_type = 1. Tips are only meaningful when this is true."
+    },
+    "is_airport": {
+      "type": "boolean",
+      "description": "Pickup or dropoff is location 1 (EWR), 132 (JFK) or 138 (LaGuardia)."
+    },
+    "duration_min": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "avg_speed_mph": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "trip_distance / (duration_min/60). null if duration < 1 min."
+    },
+    "tip_pct": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "100 * tip_amount / fare_amount for card trips with fare_amount > 0, otherwise null."
+    },
+    "pickup_hour": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 23
+    },
+    "pickup_dow": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 7,
+      "description": "ISO day of week, 1 = Monday."
+    },
+    "processed_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    }
+  },
+  "unevaluatedProperties": false,
+  "examples": [
+    {
+      "trip_id": "r0-000123456",
+      "source": "replay",
+      "trace_id": null,
+      "loop": 0,
+      "vendor_id": 2,
+      "pickup_ts": "2025-10-07T08:14:03",
+      "dropoff_ts": "2025-10-07T08:29:41",
+      "passenger_count": 1,
+      "trip_distance": 2.87,
+      "ratecode_id": 1,
+      "store_and_fwd_flag": "N",
+      "pu_location_id": 161,
+      "do_location_id": 237,
+      "payment_type": 1,
+      "fare_amount": 17.0,
+      "extra": 0.0,
+      "mta_tax": 0.5,
+      "tip_amount": 4.4,
+      "tolls_amount": 0.0,
+      "improvement_surcharge": 1.0,
+      "congestion_surcharge": 2.5,
+      "airport_fee": 0.0,
+      "cbd_congestion_fee": 0.75,
+      "total_amount": 26.15,
+      "produced_at": "2026-10-16T08:02:11.482Z",
+      "pu_zone": "Midtown Center",
+      "pu_borough": "Manhattan",
+      "pu_service_zone": "Yellow Zone",
+      "do_zone": "Upper East Side South",
+      "do_borough": "Manhattan",
+      "do_service_zone": "Yellow Zone",
+      "payment_type_name": "Credit card",
+      "is_card": true,
+      "is_airport": false,
+      "duration_min": 15.63,
+      "avg_speed_mph": 11.02,
+      "tip_pct": 25.88,
+      "pickup_hour": 8,
+      "pickup_dow": 2,
+      "processed_at": "2026-10-16T08:02:11.731Z"
+    }
+  ]
+}

@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nyc-taxi-live.local/contracts/events/trip.schema.json",
+  "title": "Trip (topic: trips.raw)",
+  "description": "One taxi trip as produced by the replayer (source=replay) or the ride API (source=student). Field names are snake_case versions of the NYC TLC yellow-taxi columns. *_ts fields are SIM time: naive NYC local wall-clock, no zone suffix. *_at fields are WALL time in UTC with a trailing Z.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "#/$defs/trip_fields"
+    }
+  ],
+  "unevaluatedProperties": false,
+  "$defs": {
+    "sim_ts": {
+      "type": "string",
+      "description": "Sim time: naive NYC local wall-clock, ISO-8601 without zone.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?$"
+    },
+    "wall_at": {
+      "type": "string",
+      "description": "Wall time: UTC, ISO-8601 with millisecond precision and a Z suffix.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "trip_fields": {
+      "type": "object",
+      "required": [
+        "trip_id",
+        "source",
+        "trace_id",
+        "loop",
+        "pickup_ts",
+        "dropoff_ts",
+        "pu_location_id",
+        "do_location_id",
+        "trip_distance",
+        "payment_type",
+        "fare_amount",
+        "tip_amount",
+        "total_amount",
+        "produced_at"
+      ],
+      "properties": {
+        "trip_id": {
+          "type": "string",
+          "description": "Replay: 'r{loop}-{row_idx:09d}'. Student: 's-{uuid4}'. Also the Kafka message key.",
+          "pattern": "^(r\\d+-\\d{9}|s-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "replay",
+            "student"
+          ]
+        },
+        "trace_id": {
+          "description": "UUID if this trip is traced (every student ride plus a ~0.1% sample of replay trips), otherwise null.",
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loop": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Replay loop number. Every loop shifts sim time by REPLAY_LOOP_OFFSET_DAYS. Always 0 for student rides."
+        },
+        "vendor_id": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "pickup_ts": {
+          "$ref": "#/$defs/sim_ts"
+        },
+        "dropoff_ts": {
+          "$ref": "#/$defs/sim_ts"
+        },
+        "passenger_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "trip_distance": {
+          "type": "number",
+          "description": "Miles, as reported by the taximeter. Can be dirty: <= 0 or absurdly large."
+        },
+        "ratecode_id": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "store_and_fwd_flag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "Y",
+            "N",
+            null
+          ]
+        },
+        "pu_location_id": {
+          "type": "integer",
+          "description": "TLC taxi zone id of the pickup. 1-263 are real zones, 264 = Unknown, 265 = Outside of NYC."
+        },
+        "do_location_id": {
+          "type": "integer"
+        },
+        "payment_type": {
+          "type": "integer",
+          "description": "0=Flex Fare, 1=Credit card, 2=Cash, 3=No charge, 4=Dispute, 5=Unknown, 6=Voided trip. Tips are only recorded for 1 (card)."
+        },
+        "fare_amount": {
+          "type": "number"
+        },
+        "extra": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mta_tax": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tip_amount": {
+          "type": "number",
+          "description": "USD. Only populated for card payments. Cash tips are not in the data."
+        },
+        "tolls_amount": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "improvement_surcharge": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "congestion_surcharge": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "airport_fee": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cbd_congestion_fee": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Manhattan congestion pricing fee, charged since 2025-01-05."
+        },
+        "total_amount": {
+          "type": "number"
+        },
+        "produced_at": {
+          "$ref": "#/$defs/wall_at"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "trip_id": "r0-000123456",
+      "source": "replay",
+      "trace_id": null,
+      "loop": 0,
+      "vendor_id": 2,
+      "pickup_ts": "2025-10-07T08:14:03",
+      "dropoff_ts": "2025-10-07T08:29:41",
+      "passenger_count": 1,
+      "trip_distance": 2.87,
+      "ratecode_id": 1,
+      "store_and_fwd_flag": "N",
+      "pu_location_id": 161,
+      "do_location_id": 237,
+      "payment_type": 1,
+      "fare_amount": 17.0,
+      "extra": 0.0,
+      "mta_tax": 0.5,
+      "tip_amount": 4.4,
+      "tolls_amount": 0.0,
+      "improvement_surcharge": 1.0,
+      "congestion_surcharge": 2.5,
+      "airport_fee": 0.0,
+      "cbd_congestion_fee": 0.75,
+      "total_amount": 26.15,
+      "produced_at": "2026-10-16T08:02:11.482Z"
+    },
+    {
+      "trip_id": "s-3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f",
+      "source": "student",
+      "trace_id": "3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f",
+      "loop": 0,
+      "vendor_id": null,
+      "pickup_ts": "2025-10-09T17:42:00",
+      "dropoff_ts": "2025-10-09T17:58:30",
+      "passenger_count": 1,
+      "trip_distance": 3.1,
+      "ratecode_id": 1,
+      "store_and_fwd_flag": null,
+      "pu_location_id": 230,
+      "do_location_id": 132,
+      "payment_type": 1,
+      "fare_amount": 19.5,
+      "extra": 0.0,
+      "mta_tax": 0.5,
+      "tip_amount": 5.0,
+      "tolls_amount": 0.0,
+      "improvement_surcharge": 1.0,
+      "congestion_surcharge": 2.5,
+      "airport_fee": 0.0,
+      "cbd_congestion_fee": 0.75,
+      "total_amount": 29.25,
+      "produced_at": "2026-10-16T10:31:07.019Z"
+    }
+  ]
+}

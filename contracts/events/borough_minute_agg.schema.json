@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nyc-taxi-live.local/contracts/events/borough_minute_agg.schema.json",
+  "title": "Borough-minute aggregate (topic: agg.borough_minute, table: taxi.agg_borough_minute)",
+  "description": "One closed 1-minute tumbling window (SIM time) per pickup borough, computed by the stream processor. Windows are keyed by pu_borough and emitted once the window plus the grace period has passed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "window_start", "window_end", "borough", "trips", "revenue",
+    "avg_fare", "avg_distance", "card_trips", "avg_card_tip_pct",
+    "student_trips", "emitted_at"
+  ],
+  "properties": {
+    "window_start": { "$ref": "#/$defs/sim_ts" },
+    "window_end": { "$ref": "#/$defs/sim_ts" },
+    "borough": { "type": "string" },
+    "trips": { "type": "integer", "minimum": 1 },
+    "revenue": { "type": "number", "description": "sum(total_amount), USD." },
+    "avg_fare": { "type": "number" },
+    "avg_distance": { "type": "number" },
+    "card_trips": { "type": "integer", "minimum": 0 },
+    "avg_card_tip_pct": { "type": ["number", "null"], "description": "Mean tip_pct over card trips with non-null tip_pct. null if there are none." },
+    "student_trips": { "type": "integer", "minimum": 0 },
+    "emitted_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" }
+  },
+  "$defs": {
+    "sim_ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?$" }
+  },
+  "examples": [
+    {
+      "window_start": "2025-10-07T08:14:00",
+      "window_end": "2025-10-07T08:15:00",
+      "borough": "Manhattan",
+      "trips": 142,
+      "revenue": 3521.4,
+      "avg_fare": 16.8,
+      "avg_distance": 2.41,
+      "card_trips": 118,
+      "avg_card_tip_pct": 22.7,
+      "student_trips": 0,
+      "emitted_at": "2026-10-16T08:02:15.004Z"
+    }
+  ]
+}

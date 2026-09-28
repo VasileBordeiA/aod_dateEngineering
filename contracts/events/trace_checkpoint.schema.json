@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nyc-taxi-live.local/contracts/events/trace_checkpoint.schema.json",
+  "title": "Trace checkpoint (topic: trace.checkpoints, table: taxi.trace_events)",
+  "description": "One stage a traced trip passed through. Each pipeline stage emits exactly one checkpoint per traced trip. Latency between stages is computed from `at` (wall time) only, never from sim time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["trace_id", "trip_id", "source", "stage", "seq", "service", "at", "detail"],
+  "properties": {
+    "trace_id": { "type": "string", "format": "uuid" },
+    "trip_id": { "type": "string" },
+    "source": { "type": "string", "enum": ["replay", "student"] },
+    "stage": {
+      "type": "string",
+      "enum": ["submitted", "ingested", "validated", "rejected", "enriched", "aggregated", "stored", "queryable"]
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 7,
+      "description": "Position in the happy path: submitted=1, ingested=2, validated=3, enriched=4, aggregated=5, stored=6, queryable=7. rejected=3 (it replaces validated and is terminal)."
+    },
+    "service": { "type": "string", "enum": ["api", "replayer", "processor"] },
+    "at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" },
+    "detail": {
+      "type": "object",
+      "description": "Stage-specific facts shown in the trace viewer. Known keys per stage are listed in docs/specs/07-trace-your-ride.md.",
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    {
+      "trace_id": "3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f",
+      "trip_id": "s-3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f",
+      "source": "student",
+      "stage": "ingested",
+      "seq": 2,
+      "service": "api",
+      "at": "2026-10-16T10:31:07.041Z",
+      "detail": { "topic": "trips.raw", "partition": 1, "offset": 482113 }
+    },
+    {
+      "trace_id": "3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f",
+      "trip_id": "s-3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f",
+      "source": "student",
+      "stage": "aggregated",
+      "seq": 5,
+      "service": "processor",
+      "at": "2026-10-16T10:31:07.120Z",
+      "detail": { "window_start": "2025-10-09T17:42:00", "borough": "Manhattan" }
+    }
+  ]
+}
