@@ -95,7 +95,7 @@ erDiagram
 |---|---|---|
 | processor sinks, api (`agent_log` insert) | `ingest_writer` | INSERT on `taxi.trips`, `taxi.trips_rejected`, `taxi.agg_borough_minute`, `taxi.agent_log` |
 | agent (`run_query`, `describe_table`), api (`queryable` poll, fare estimate) | `agent_ro` | SELECT on the agent whitelist (below), `readonly=1`, hard limits |
-| Grafana | `grafana_ro` | SELECT on `taxi.*`, `system.parts`, `system.query_log`. `readonly=2` + constraints |
+| Grafana (public dashboards) | `grafana_ro` | SELECT on the dashboard tables (`trips`, `trips_rejected`, `agg_borough_minute`, `zones`, `sim_now`, `trace_events`) and `system.parts`. **Not** `agent_log` or `system.query_log`: anonymous viewers can send arbitrary SQL through Grafana's query API. `readonly=2` + constraints + the `grafana` quota |
 | operators (make, migrations) | `admin` (from `CLICKHOUSE_ADMIN_PASSWORD`) | all, localhost only |
 
 **Agent whitelist:** `taxi.trips`, `taxi.trips_rejected`, `taxi.agg_borough_minute`, `taxi.zones`, `taxi.sim_now`, `taxi.trace_events`. `taxi.agent_log` is **not** on the list, because it holds other visitors' questions.
@@ -358,10 +358,9 @@ COMMENT 'Operator-only log of agent questions. NOT visible to the agent.';
       <password from_env="CLICKHOUSE_GRAFANA_PASSWORD"/>
       <profile>grafana</profile><quota>default</quota>
       <networks><ip>::/0</ip></networks>
-      <grants>
-        <query>GRANT SELECT ON taxi.*</query>
-        <query>GRANT SELECT ON system.parts</query>       <!-- Stand Health dashboard -->
-        <query>GRANT SELECT ON system.query_log</query>
+      <grants>  <!-- explicit list: no agent_log, no system.query_log (see Interfaces) -->
+        <query>GRANT SELECT ON taxi.trips</query>  <!-- … trips_rejected, agg_borough_minute, zones, sim_now, trace_events -->
+        <query>GRANT SELECT ON system.parts</query>
       </grants>
     </grafana_ro>
   </users>

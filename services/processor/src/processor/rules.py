@@ -26,6 +26,10 @@ MAX_DISTANCE_MILES = 200.0
 MAX_DURATION = timedelta(hours=6)
 REQUIRED_INT = ("pu_location_id", "do_location_id", "payment_type")
 REQUIRED_NUM = ("trip_distance", "fare_amount", "tip_amount", "total_amount")
+OPTIONAL_NUM = ("extra", "mta_tax", "tolls_amount", "improvement_surcharge", "congestion_surcharge",
+                "airport_fee", "cbd_congestion_fee")
+# Integer fields and the ClickHouse column range they must fit (UInt8 / UInt16).
+INT_RANGES = {"loop": (0, 65_535), "payment_type": (0, 255), "vendor_id": (0, 255), "ratecode_id": (0, 255)}
 SOURCES = ("replay", "student")
 
 
@@ -47,14 +51,31 @@ def is_uuid(v: Any) -> bool:
     return True
 
 
+def _schema_ok(t: Mapping[str, Any]) -> bool:
+    """Every field downstream code or a ClickHouse column type relies on (trip contract)."""
+    if not isinstance(t.get("trip_id"), str) or t.get("source") not in SOURCES:
+        return False
+    if parse_sim(t.get("pickup_ts")) is None or parse_sim(t.get("dropoff_ts")) is None:
+        return False
+    if not all(_is_int(t.get(k)) for k in REQUIRED_INT) or not all(_is_num(t.get(k)) for k in REQUIRED_NUM):
+        return False
+    if not all(t.get(k) is None or _is_num(t.get(k)) for k in OPTIONAL_NUM):
+        return False
+    for k, (lo, hi) in INT_RANGES.items():
+        v = t.get(k)
+        if v is not None and not (_is_int(v) and lo <= int(v) <= hi):
+            return False
+    if t.get("trace_id") is not None and not is_uuid(t.get("trace_id")):
+        return False
+    return t.get("store_and_fwd_flag") in ("Y", "N", None)
+
+
 def check_trip(t: Mapping[str, Any], tip_max_abs: float = 100.0) -> list[str]:
     """Every reason code the trip fails, in REASON_CODES order. Empty list = valid."""
-    pickup, dropoff = parse_sim(t.get("pickup_ts")), parse_sim(t.get("dropoff_ts"))
-    if (not isinstance(t.get("trip_id"), str) or t.get("source") not in SOURCES
-            or pickup is None or dropoff is None
-            or not all(_is_int(t.get(k)) for k in REQUIRED_INT)
-            or not all(_is_num(t.get(k)) for k in REQUIRED_NUM)):
+    if not _schema_ok(t):
         return ["SCHEMA_INVALID"]
+    pickup, dropoff = parse_sim(t["pickup_ts"]), parse_sim(t["dropoff_ts"])
+    assert pickup is not None and dropoff is not None
     fare, total = float(t["fare_amount"]), float(t["total_amount"])
     dist, tip = float(t["trip_distance"]), float(t["tip_amount"])
     reasons = []
@@ -90,7 +111,7 @@ def annotate(raw: bytes | str | Mapping[str, Any], tip_max_abs: float = 100.0) -
         text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
         try:
             value = json.loads(text)
-        except ValueError:
+        except (ValueError, RecursionError):  # RecursionError: absurdly nested input
             return {"_reasons": ["SCHEMA_INVALID"], "_raw": text}
         if not isinstance(value, dict):
             return {"_reasons": ["SCHEMA_INVALID"], "_raw": text}

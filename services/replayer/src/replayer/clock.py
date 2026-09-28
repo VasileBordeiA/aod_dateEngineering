@@ -59,6 +59,11 @@ class SimClock:
             self._reanchor()
         self._speed = float(speed)
 
+    def jump_to(self, ts: datetime) -> None:
+        """Move sim time forward to ts (never backwards) and keep running from there."""
+        if ts > self.now():
+            self._sim_anchor, self._wall_anchor = ts, self._mono()
+
     def tick(self) -> datetime:
         """Call once per loop iteration."""
         mono = self._mono()

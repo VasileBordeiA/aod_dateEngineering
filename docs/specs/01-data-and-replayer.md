@@ -109,9 +109,11 @@ flowchart LR
   while True:
       now = sim_now()
       while next_row.pickup_ts + offset ≤ now: produce(next_row, offset); advance()
-      if end_of_file: loop += 1; row_idx = 0; offset = …   # sim time keeps moving forward
+      if end_of_file: loop += 1; row_idx = 0; offset = …
+                      clock.jump_to(row0.pickup_ts + offset)   # skip the empty days (see below)
       sleep(min(0.02, time until next_row is due))
   ```
+- **Loop wrap (live).** The next loop's first trip is 35 days after the month's first trip, so the month's last trip is followed by about 4 empty sim days (about 96 wall-minutes at 60×). At the wrap the clock **jumps forward** to that trip. Weekdays still line up (35 = 5 × 7), and sim time never moves backwards.
 - **Backfill mode** (`REPLAY_SPEED=max`) produces as fast as the producer allows (use `produce()` and `poll(0)`, with `flush` every 10 k rows). `sim_now` is set to the `pickup_ts` of the last row produced. It stops, flushes, saves state, and exits 0 when `sim_now ≥ REPLAY_UNTIL_TS`. `sim.clock` is still emitted, with `mode="backfill"` and `speed="max"`.
 - **Heartbeat.** Every `REPLAY_CLOCK_INTERVAL_S` of wall time, produce to `sim.clock`, key `clock`: `{sim_ts, at, speed, loop, row_idx, paused, mode}`.
 

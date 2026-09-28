@@ -124,7 +124,7 @@ Visual rules (load the `dataviz` skill when building):
 | Agent errors (last 20) | `SELECT asked_at, provider, error FROM taxi.agent_log WHERE NOT success ORDER BY asked_at DESC LIMIT 20` | n/a |
 | ClickHouse slow queries | `system.query_log`, `query_duration_ms > 2000`, last 15 min | n/a |
 
-This dashboard needs `GRANT SELECT ON system.parts` and `GRANT SELECT ON system.query_log` for `grafana_ro`. Add them to spec 04's users XML. `grafana_ro` may read `taxi.agent_log`, but this dashboard isn't shown to visitors.
+This dashboard reads `taxi.agent_log` and `system.query_log`, which `grafana_ro` must **not** have: anonymous viewers can send arbitrary SQL through Grafana's query API (spec 04). M2 adds a second, operator-only datasource (user `grafana_ops`, SELECT on `taxi.agent_log`, `system.parts`, `system.query_log`) that only the Stand Health folder uses, and that folder isn't visible to anonymous viewers.
 
 ## Failure modes
 | Failure | Behaviour |

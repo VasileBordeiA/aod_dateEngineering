@@ -143,3 +143,18 @@ def test_grafana_datasource_is_healthy_through_caddy():
 def test_console_is_up():
     with urllib.request.urlopen("http://127.0.0.1:8080/", timeout=10) as r:
         assert r.status == 200
+
+
+@pytest.mark.parametrize("sql", ["SELECT count() FROM taxi.agent_log", "SELECT count() FROM system.query_log",
+                                 "SELECT count() FROM system.users"])
+def test_grafana_ro_cannot_read_visitor_text(sql):
+    """Anonymous Grafana viewers can send arbitrary SQL through /grafana/api/ds/query (CLAUDE.md invariant 8)."""
+    with pytest.raises(DatabaseError):
+        client("grafana_ro", "CLICKHOUSE_GRAFANA_PASSWORD").query(sql)
+
+
+def test_grafana_ro_reads_dashboard_tables():
+    g = client("grafana_ro", "CLICKHOUSE_GRAFANA_PASSWORD")
+    for t in ["taxi.trips", "taxi.trips_rejected", "taxi.agg_borough_minute", "taxi.zones", "taxi.sim_now",
+              "taxi.trace_events", "system.parts"]:
+        g.query(f"SELECT * FROM {t} LIMIT 1")

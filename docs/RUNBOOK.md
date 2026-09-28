@@ -81,7 +81,7 @@ make down                            # volumes keep everything
 
 ## 4. During the day
 - Every hour, glance at **Stand Health**: freshness is green, agent success is ≥ 90%, and memory is flat.
-- If the replayer reaches the end of the month, it loops by itself (+35 days). You don't need to do anything.
+- If the replayer reaches the end of the month, it loops by itself: the sim clock jumps about 4 days forward, to the same weekday 5 weeks later. The dashboard shows a date jump, and that's expected. You don't need to do anything.
 - Avoid pausing the replayer during visits. The dashboard freezes.
 - A crowd arrives after a lecture: point them to the QR card. The rate limits protect the laptop. When the queue is long, the agent says "You're next in line…", which is expected.
 

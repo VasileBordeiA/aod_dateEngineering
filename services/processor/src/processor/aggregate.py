@@ -10,11 +10,17 @@ from processor.times import format_sim, sim_from_epoch_ms
 
 def _empty() -> dict[str, Any]:
     return {"trips": 0, "revenue": 0.0, "fare_sum": 0.0, "distance_sum": 0.0, "card_trips": 0,
-            "card_tip_pct_sum": 0.0, "card_tip_pct_n": 0, "student_trips": 0}
+            "card_tip_pct_sum": 0.0, "card_tip_pct_n": 0, "student_trips": 0, "trip_ids": []}
 
 
 def add_trip(bucket: Mapping[str, Any], trip: Mapping[str, Any]) -> dict[str, Any]:
+    """Idempotent per trip_id: at-least-once redelivery (sink retry, restart) must not double-count.
+    A bucket holds one borough-minute (≈200 ids at peak), so the id list stays small."""
+    seen = bucket.get("trip_ids", [])  # .get: window state persisted before this field existed
+    if trip["trip_id"] in seen:
+        return dict(bucket)
     b = dict(bucket)
+    b["trip_ids"] = [*seen, trip["trip_id"]]
     b["trips"] += 1
     b["revenue"] += float(trip["total_amount"])
     b["fare_sum"] += float(trip["fare_amount"])

@@ -67,16 +67,18 @@ def test_only_due_rows_are_produced(tmp_path, replay_parquet, mono):
         assert_valid("trip", t)
 
 
-def test_loops_with_offset_after_end_of_file(tmp_path, replay_parquet, mono):
-    rep, out = make(tmp_path, replay_parquet, mono, REPLAY_SPEED="100000")
-    mono.t = 1.0
-    assert rep.step(max_rows=100) == 20
-    assert rep.state.loop == 1 and rep.state.row_idx == 0
-    for _ in range(8):  # small wall steps: a jump > 10 s would be treated as a freeze (see test_clock)
-        mono.t += 5.0
-        rep.step(max_rows=100)
+def test_loop_jumps_the_clock_to_the_next_loops_first_trip(tmp_path, replay_parquet, mono):
+    """At EOF the next loop starts 35 days later: the sim clock jumps there instead of idling (at 60x the
+    gap between Oct 31 and Nov 5 would be ~96 wall-minutes of no data). Weekdays still line up (35 = 5x7)."""
+    rep, out = make(tmp_path, replay_parquet, mono)
+    mono.t = 10.0  # sim 07:10 → all 20 rows (07:00:00 … 07:09:30) are due
+    assert rep.step(max_rows=21) == 21
     loop1 = out.on("trips.raw")[20]
     assert loop1["trip_id"] == "r1-000000000" and loop1["pickup_ts"] == "2025-11-11T07:00:00"
+    assert rep.state.loop == 1 and rep.clock.now() == datetime(2025, 11, 11, 7, 0)
+    mono.t = 11.0  # the clock keeps running from the jump
+    rep.step()
+    assert out.on("trips.raw")[-1]["pickup_ts"] == "2025-11-11T07:01:00"
 
 
 def test_backfill_stops_at_until_and_live_resumes_there(tmp_path, replay_parquet, mono):

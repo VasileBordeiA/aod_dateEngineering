@@ -13,6 +13,7 @@ import re
 import threading
 import time
 from collections import Counter
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,18 @@ class Stats:
             event("progress", **{k: v for k, v in snap.items() if ":" not in k}, by_reason=reasons)
 
 
+def make_error_callback(kind: str, stats: Stats) -> Callable[[Exception, Any, Any], bool]:
+    """Last-resort net (spec 03: never crash on bad input). check_trip rejects bad records first; this only
+    catches what slips through. Sink flush errors don't come through here, so no ClickHouse batch is dropped."""
+
+    def callback(exc: Exception, row: Any, logger: Any) -> bool:
+        stats.add(f"errors_{kind}")
+        event("record_skipped", kind=kind, error=f"{type(exc).__name__}: {exc}"[:300])
+        return True
+
+    return callback
+
+
 def build(cfg: Config, stats: Stats) -> Application:
     zones = load_zones(cfg.zones_path)
     app = Application(
@@ -82,8 +95,11 @@ def build(cfg: Config, stats: Stats) -> Application:
         processing_guarantee="at-least-once",
         state_dir=str(cfg.state_dir),
         loglevel="WARNING",
+        on_processing_error=make_error_callback("processing", stats),
+        on_consumer_error=make_error_callback("consumer", stats),
     )
-    raw_t = app.topic("trips.raw", value_deserializer="bytes", key_deserializer="str",
+    # bytes for key and value: nothing a producer sends can fail deserialization (the key is unused)
+    raw_t = app.topic("trips.raw", value_deserializer="bytes", key_deserializer="bytes",
                       timestamp_extractor=pickup_ts_ms)
     enriched_t = app.topic("trips.enriched", key_serializer="str", key_deserializer="str",
                            timestamp_extractor=pickup_ts_ms)

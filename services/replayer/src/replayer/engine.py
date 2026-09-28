@@ -75,6 +75,7 @@ class Replayer:
                 if row is None:
                     break
                 due = row["pickup_ts"] + timedelta(days=self.state.loop * self.cfg.loop_offset_days)
+                now = max(now, self.clock.now())  # the clock may have jumped at a loop wrap
                 if self.cfg.speed is None:
                     if self.cfg.until_ts is not None and due > self.cfg.until_ts:
                         self._finish()
@@ -101,7 +102,11 @@ class Replayer:
             self.state.row_idx = 0
             self._rows = self.source.rows_from(0)
             self._next = next(self._rows, None)
-            event("loop", loop=self.state.loop)
+            if self._next is not None and isinstance(self.clock, SimClock):
+                # Skip the empty days between the end of the month and the shifted start of the next loop.
+                offset = timedelta(days=self.state.loop * self.cfg.loop_offset_days)
+                self.clock.jump_to(self._next["pickup_ts"] + offset)
+            event("loop", loop=self.state.loop, sim_ts=self.clock.now())
         return self._next
 
     def _produce(self, row: dict[str, Any]) -> None:

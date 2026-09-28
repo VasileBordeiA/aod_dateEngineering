@@ -5,9 +5,9 @@ from contract_validator import assert_valid
 from processor.aggregate import add_trip, init_bucket, to_agg_record
 from processor.times import sim_epoch_ms
 
-T1 = {"is_card": True, "tip_pct": 20.0, "fare_amount": 10.0, "total_amount": 15.0, "trip_distance": 1.0, "source": "replay"}
-T2 = {"is_card": True, "tip_pct": 30.0, "fare_amount": 20.0, "total_amount": 30.0, "trip_distance": 3.0, "source": "student"}
-T3 = {"is_card": False, "tip_pct": None, "fare_amount": 30.0, "total_amount": 35.0, "trip_distance": 5.0, "source": "replay"}
+T1 = {"trip_id": "r0-000000001", "is_card": True, "tip_pct": 20.0, "fare_amount": 10.0, "total_amount": 15.0, "trip_distance": 1.0, "source": "replay"}
+T2 = {"trip_id": "r0-000000002", "is_card": True, "tip_pct": 30.0, "fare_amount": 20.0, "total_amount": 30.0, "trip_distance": 3.0, "source": "student"}
+T3 = {"trip_id": "r0-000000003", "is_card": False, "tip_pct": None, "fare_amount": 30.0, "total_amount": 35.0, "trip_distance": 5.0, "source": "replay"}
 START = sim_epoch_ms(datetime(2025, 10, 7, 8, 14))
 AT = "2026-10-16T08:02:15.004Z"
 
@@ -33,3 +33,16 @@ def test_add_trip_does_not_mutate():
     bucket = init_bucket(T1)
     add_trip(bucket, T2)
     assert bucket["trips"] == 1
+
+
+def test_redelivered_trip_is_counted_once():
+    """At-least-once: a sink retry or restart re-produces trips.enriched; the window must not double-count."""
+    bucket = add_trip(add_trip(add_trip(init_bucket(T1), T2), T1), T2)
+    record = to_agg_record({"start": START, "end": START + 60_000, "value": bucket}, "Manhattan", AT)
+    assert record["trips"] == 2 and record["revenue"] == 45.0 and record["student_trips"] == 1
+    assert_valid("borough_minute_agg", record)
+
+
+def test_bucket_from_older_state_without_trip_ids_still_works():
+    legacy = {k: v for k, v in init_bucket(T1).items() if k != "trip_ids"}  # window state written before the id list
+    assert add_trip(legacy, T2)["trips"] == 2

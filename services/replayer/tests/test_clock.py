@@ -56,3 +56,13 @@ def test_manual_clock_only_moves_forward():
     c.advance_to(datetime(2025, 10, 7, 8))
     c.advance_to(datetime(2025, 10, 7, 7, 30))
     assert c.now() == c.tick() == datetime(2025, 10, 7, 8) and c.paused is False
+
+
+def test_jump_to_moves_forward_only_and_keeps_running(mono):
+    c = SimClock(T0, 60, mono)
+    c.jump_to(datetime(2025, 11, 11, 7, 0))
+    assert c.now() == datetime(2025, 11, 11, 7, 0)
+    mono.t = 1.0
+    assert c.now() == datetime(2025, 11, 11, 7, 1)
+    c.jump_to(datetime(2025, 10, 1))  # never backwards
+    assert c.now() == datetime(2025, 11, 11, 7, 1)

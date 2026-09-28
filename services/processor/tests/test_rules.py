@@ -84,3 +84,23 @@ def test_is_traced():
     assert is_traced(dict(BASE, trace_id="3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f"))
     assert not is_traced(BASE) and not is_traced(dict(BASE, trace_id="nope"))
     assert not is_traced({"_reasons": ["SCHEMA_INVALID"], "_raw": "x"})
+
+
+@pytest.mark.parametrize("bad", [
+    {"loop": "x"}, {"loop": -1}, {"loop": 70000}, {"vendor_id": "x"}, {"vendor_id": 1_000_000},
+    {"ratecode_id": 300}, {"extra": "x"}, {"airport_fee": float("inf")}, {"trace_id": "abc"}, {"trace_id": 5},
+    {"store_and_fwd_flag": 7}, {"payment_type": 256},
+])
+def test_every_contract_type_is_checked(bad):
+    """Anything enrich()/trip_row()/ClickHouse would choke on must be SCHEMA_INVALID, never a crash."""
+    assert check_trip(dict(BASE, **bad)) == ["SCHEMA_INVALID"]
+
+
+def test_deeply_nested_json_is_rejected_not_raised():
+    assert annotate(b"[" * 100_000)["_reasons"] == ["SCHEMA_INVALID"]
+
+
+def test_valid_optional_values_still_pass():
+    ok = dict(BASE, loop=3, vendor_id=2, ratecode_id=99, extra=None, airport_fee=1.75, store_and_fwd_flag="Y",
+              trace_id="3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f")
+    assert check_trip(ok) == []

@@ -10,17 +10,19 @@ from confluent_kafka import KafkaError, Message, Producer
 
 from replayer.log import event
 
+PRODUCER_CONFIG: dict[str, Any] = {
+    "acks": "all",
+    "enable.idempotence": True,
+    "linger.ms": 20,
+    "compression.type": "lz4",
+    "queue.buffering.max.messages": 100_000,
+    "message.timeout.ms": 0,  # never expire: rows wait out a broker outage, then the queue fills → self-pause
+}
+
 
 class KafkaOut:
     def __init__(self, brokers: str) -> None:
-        self._p = Producer({
-            "bootstrap.servers": brokers,
-            "acks": "all",
-            "enable.idempotence": True,
-            "linger.ms": 20,
-            "compression.type": "lz4",
-            "queue.buffering.max.messages": 100_000,
-        })
+        self._p = Producer({"bootstrap.servers": brokers, **PRODUCER_CONFIG})
 
     def send(self, topic: str, key: str, value: dict[str, Any],
              on_delivery: Callable[[int, int], None] | None = None) -> None:
