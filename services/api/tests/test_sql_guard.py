@@ -96,6 +96,60 @@ ATTACKS = [
     # taxi.agent_log), so the guard must too — a differently-cased CTE is not a shadow.
     "WITH AGENT_LOG AS (SELECT 1 AS x) SELECT * FROM agent_log",
     "WITH Agent_Log AS (SELECT 1 AS x) SELECT * FROM `agent_log`",
+    # fix round 5: each WITH name is defined at most once in the whole statement. An outer `b` and
+    # an inner `b` let ClickHouse pick the later inner sibling, close a cycle and read the real
+    # taxi.agent_log (verified as agent_ro: ACCESS_DENIED on taxi.agent_log).
+    "WITH b AS (SELECT 1 AS x) SELECT * FROM "
+    "(WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM agent_log) SELECT * FROM agent_log)",
+    "WITH agent_log AS (SELECT 1 AS x) SELECT * FROM "
+    "(WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT * FROM a) SELECT * FROM a)",
+    "WITH b AS (SELECT 1 AS x), b AS (SELECT 2 AS x) SELECT * FROM b",
+    "WITH b AS (SELECT 1 AS x) SELECT * FROM (WITH b AS (SELECT 2 AS x) SELECT * FROM b)",
+    "WITH 1 AS b, b AS (SELECT 2 AS x) SELECT * FROM b",
+    # fix round 5: a bare name on the right of IN is a TABLE to ClickHouse (sqlglot calls it a
+    # Column). Verified as agent_ro: these reached taxi.agent_log / system.users (ACCESS_DENIED).
+    "SELECT 1 WHERE 'x' IN system.users",
+    "SELECT 1 FROM trips WHERE 1 IN agent_log",
+    "SELECT 1 FROM trips WHERE pu_zone IN taxi.agent_log",
+    "SELECT 1 FROM trips WHERE 1 IN (agent_log)",
+    "SELECT 1 FROM trips WHERE (1, 2) IN agent_log",
+    "SELECT 1 FROM trips WHERE 1 NOT IN agent_log",
+    "SELECT 1 FROM trips WHERE 1 NOT IN (agent_log)",
+    "SELECT 1 FROM trips WHERE 1 GLOBAL IN agent_log",
+    "SELECT 1 FROM trips WHERE 1 GLOBAL NOT IN taxi.agent_log",
+    "SELECT 1 FROM trips WHERE 1 GLOBAL IN (system.users)",
+    "SELECT 1 FROM trips WHERE 1 IN ((agent_log))",
+    "SELECT 1 FROM trips WHERE 1 IN `agent_log`",
+    "SELECT 1 FROM trips WHERE 1 IN taxi.`agent_log`",
+    "SELECT 1 FROM trips WHERE 1 IN system.users.name",
+    "SELECT 1 IN agent_log",
+    "SELECT * FROM trips WHERE pu_location_id IN (SELECT location_id FROM zones WHERE 1 IN agent_log)",
+    "WITH a AS (SELECT 1 AS x FROM trips WHERE 1 IN agent_log) SELECT * FROM a",
+    "WITH a AS (SELECT 1 AS x FROM trips WHERE 1 IN b), b AS (SELECT 1 AS y) SELECT * FROM a",
+    "WITH 1 AS s SELECT 1 FROM trips WHERE 1 IN s",
+    "SELECT 1 FROM trips AS t WHERE 1 IN t",
+    # fix round 5: the function spellings of IN also read a bare name as a table.
+    "SELECT notIn(1, agent_log)",
+    "SELECT globalIn(1, agent_log)",
+    "SELECT `in`(1, agent_log)",
+    "SELECT globalNotNullIn(1, agent_log)",
+    "SELECT count() FROM trips WHERE notIn(payment_type, (1, 2))",
+    # fix round 5: the whitelist is exact-case; ClickHouse is case-sensitive, so this never runs.
+    "select count() from TAXI.TRIPS",
+    "SELECT count() FROM Trips",
+    "SELECT count() FROM TAXI.trips",
+    "SELECT 1 FROM trips WHERE 1 IN ZONES",
+    # fix round 5: functions that take a table name as a string.
+    "SELECT hasColumnInTable('taxi', 'agent_log', 'question')",
+    "SELECT hasTable('taxi', 'agent_log')",
+    "SELECT hasTableOrView('system', 'users')",
+    "SELECT hasDictionary('d')",
+    "SELECT joinGet('taxi.agent_log', 'x', 1)",
+    "SELECT joinGetOrNull('taxi.agent_log', 'x', 1)",
+    "SELECT dictHas('d', 1)",
+    "SELECT dictIsIn('d', 1, 2)",
+    "SELECT getServerSetting('max_server_memory_usage')",
+    "SELECT getMergeTreeSetting('index_granularity')",
 ]
 
 MUST_PASS = [
@@ -110,7 +164,6 @@ MUST_PASS = [
     "SELECT argMax(trips, emitted_at) FROM agg_borough_minute",
     "SELECT z.zone, count() FROM trips AS t INNER JOIN zones AS z ON z.location_id = t.pu_location_id GROUP BY z.zone",
     "SELECT stage, count() FROM trace_events GROUP BY stage",
-    "select count() from TAXI.TRIPS",
     "SELECT count() FROM taxi.trips;",
     "SELECT 1 UNION ALL SELECT 2",
     # CTE visibility is backward-only (see sql_guard._visible_cte_names): a plain backward
@@ -125,6 +178,18 @@ MUST_PASS = [
     # fix round 4: backticks don't change a name, and an inner query may still use an outer CTE.
     "WITH `b` AS (SELECT 1 AS x FROM trips) SELECT * FROM b",
     "WITH a AS (SELECT 1 AS x FROM trips) SELECT * FROM (WITH b AS (SELECT * FROM a) SELECT * FROM b)",
+    # fix round 5: keyword case is free (only identifiers are exact-case); IN with a visible CTE, a
+    # subquery, a value list or a tuple() is fine; different-cased WITH names are different names.
+    "select count() from taxi.trips where payment_type in (1, 2)",
+    "WITH x AS (SELECT 1 AS a) SELECT 1 FROM trips WHERE 1 IN x",
+    "WITH x AS (SELECT 1 AS a) SELECT 1 FROM trips WHERE 1 GLOBAL NOT IN (x)",
+    "WITH x AS (SELECT 1 AS a), y AS (SELECT 1 FROM trips WHERE 1 IN x) SELECT * FROM y",
+    "SELECT count() FROM trips WHERE pu_location_id IN (SELECT location_id FROM zones WHERE borough = 'Queens')",
+    "SELECT count() FROM trips WHERE payment_type IN (1, 2)",
+    "SELECT count() FROM trips WHERE payment_type NOT IN tuple(1, 2)",
+    "SELECT count() FROM trips WHERE pu_location_id IN zones",
+    "SELECT count() FROM trips WHERE pu_location_id GLOBAL IN taxi.zones",
+    "WITH b AS (SELECT 1 AS x), B AS (SELECT 2 AS x) SELECT * FROM b UNION ALL SELECT * FROM B",
 ]
 
 
@@ -170,6 +235,14 @@ def test_whitelisted_cte_name_reason_names_it():
     assert "'trips'" in reason and "another name" in reason
     assert "'zones'" in check_sql("WITH 1 AS zones SELECT * FROM zones").reason
     assert "'Trips'" in check_sql("WITH Trips AS (SELECT 1) SELECT * FROM x").reason
+
+
+def test_round5_reasons_name_the_problem():
+    reason = check_sql("WITH b AS (SELECT 1 AS x), b AS (SELECT 2 AS x) SELECT * FROM b").reason
+    assert "'b' is defined twice" in reason
+    assert "agent_log" in check_sql("SELECT 1 FROM trips WHERE 1 IN agent_log").reason
+    assert "TAXI.TRIPS" in check_sql("select count() from TAXI.TRIPS").reason
+    assert "joinget()" in check_sql("SELECT joinGet('taxi.agent_log', 'x', 1)").reason
 
 
 def test_length_limit():
