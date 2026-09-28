@@ -5,7 +5,7 @@ import time
 import urllib.request
 import uuid
 from base64 import b64encode
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -49,9 +49,14 @@ def test_topics_exist_with_configs():
     single = {"trips.raw", "trips.enriched", "sim.clock"}  # ordered event time (ADR-014) / compacted clock
     assert all(len(md.topics[t].partitions) == 1 for t in single)
     assert all(len(md.topics[t].partitions) == 3 for t in TOPICS - single)
-    res = a.describe_configs([ConfigResource("topic", "trips.raw"), ConfigResource("topic", "sim.clock")])
+    names = sorted(TOPICS)
+    res = a.describe_configs([ConfigResource("topic", t) for t in names])
     configs = {r.name: f.result() for r, f in res.items()}
-    assert configs["trips.raw"]["retention.ms"].value == "21600000"
+    for t in TOPICS - {"sim.clock"}:
+        # Size-based retention: Quix writes event-time (2025) timestamps, so time-based retention would delete
+        # freshly written data immediately (ADR-015).
+        assert configs[t]["retention.ms"].value == "-1", t
+        assert configs[t]["retention.bytes"].value == "1073741824", t
     assert configs["sim.clock"]["cleanup.policy"].value == "compact"
 
 
@@ -103,7 +108,7 @@ def test_agent_ro_can_read_whitelist(agent):
 def test_ingest_writer_can_insert_but_not_read(admin):
     ingest = client("ingest_writer", "CLICKHOUSE_INGEST_PASSWORD")
     ingest.insert("trips_rejected", [["stack-test", "replay", None, None, ["SCHEMA_INVALID"], "{}",
-                                      datetime.now(timezone.utc)]],
+                                      datetime.now(UTC)]],
                   column_names=["trip_id", "source", "trace_id", "pickup_ts", "reasons", "payload", "rejected_at"])
     with pytest.raises(DatabaseError):
         ingest.query("SELECT count() FROM taxi.trips")

@@ -112,7 +112,7 @@ At 60×, one October month (≈3.5 M trips) lasts about 12 wall hours at ~80 msg
 | … web | 0.5 GB | compose `mem_limit` |
 | Headroom | ~2 GB | n/a |
 
-Disk: roughly 1 GB for raw and prepared data, and under 3 GB of ClickHouse data after a full event day including backfill. Kafka retention is 6 h.
+Disk: roughly 1 GB for raw and prepared data, and under 3 GB of ClickHouse data after a full event day including backfill. Kafka retention is size-based, 1 GiB per partition (ADR-015).
 
 ## 7. Security posture
 - **Network:** only Caddy listens on the LAN. Everything else is bound to `127.0.0.1` or the Compose network.

@@ -29,13 +29,13 @@ def make_server(replayer: Controllable, port: int, token: str) -> ThreadingHTTPS
             supplied = self.headers.get("X-Admin-Token", "")
             return bool(token) and hmac.compare_digest(supplied, token)
 
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             if self.path == "/status":
                 self._json(200, replayer.status())
             else:
                 self._json(404, {"error": "not found"})
 
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             if self.path not in ("/pause", "/resume", "/speed"):
                 self._json(404, {"error": "not found"})
                 return

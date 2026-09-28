@@ -56,7 +56,7 @@ flowchart TB
 
 ## 2. Topic & data-flow topology
 
-Producers → topics → consumers → tables. Every topic has 3 partitions and 6 h retention, except `sim.clock`, which is compacted with 1 partition.
+Producers → topics → consumers → tables. `trips.raw` and `trips.enriched` have 1 partition (ordered event time, ADR-014). The others have 3. All use size-based retention of 1 GiB per partition (ADR-015), except `sim.clock`, which is compacted.
 
 ```mermaid
 flowchart LR
@@ -73,7 +73,8 @@ flowchart LR
         clk[(sim.clock)]
     end
     subgraph processor[processor · Quix Streams]
-        V[validate] --> E[enrich] --> W[1-min tumbling window<br/>per pu_borough]
+        V[validate] --> E[enrich]
+        W[1-min tumbling window<br/>per pu_borough]
         S1[ClickHouse sink<br/>trips]
         S2[ClickHouse sink<br/>rejected]
         S3[ClickHouse sink<br/>aggregates]
@@ -97,6 +98,7 @@ flowchart LR
     raw --> V
     V -- invalid --> rej --> S2 --> T2
     E --> enr
+    enr --> W
     E --> S1 --> T1
     W --> agg --> S3 --> T3
     V -.-> tr
@@ -442,7 +444,7 @@ flowchart LR
     rej --> rejs[["sink → taxi.trips_rejected"]]
     enr --> enrt[(trips.enriched)]
     enr --> ts[["sink → taxi.trips"]]
-    enr --> gb["group_by pu_borough"] --> win["tumbling window 1 min<br/>grace 180 s (sim)"] --> red["reduce → final"]
+    enrt --> gb["group_by pu_borough"] --> win["tumbling window 1 min<br/>grace 180 s (sim)"] --> red["reduce → final"]
     red --> aggt[(agg.borough_minute)]
     red --> aggs[["sink → taxi.agg_borough_minute"]]
     ann -.->|"traced: validated / rejected"| tr[(trace.checkpoints)]

@@ -1,12 +1,11 @@
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from contract_validator import assert_valid
 
-from replayer.messages import (build_clock, build_ingested_checkpoint, build_trip, format_wall,
-                               sampled_trace_id, trip_id)
+from replayer.messages import build_clock, build_ingested_checkpoint, build_trip, format_wall, sampled_trace_id, trip_id
 
-WALL = datetime(2026, 10, 16, 8, 2, 11, 482_000, tzinfo=timezone.utc)
+WALL = datetime(2026, 10, 16, 8, 2, 11, 482_000, tzinfo=UTC)
 ROW = {
     "row_idx": 123456, "vendor_id": 2, "pickup_ts": datetime(2025, 10, 7, 8, 14, 3),
     "dropoff_ts": datetime(2025, 10, 7, 8, 29, 41), "passenger_count": 1, "trip_distance": 2.87,

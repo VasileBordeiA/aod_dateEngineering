@@ -5,7 +5,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import contract_validator as cv  # noqa: E402
+import contract_validator as cv
 
 EXPECTED = {"trip", "enriched_trip", "rejected_trip", "borough_minute_agg", "trace_checkpoint", "sim_clock"}
 

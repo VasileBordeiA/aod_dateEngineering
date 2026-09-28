@@ -56,11 +56,11 @@ gantt
 
 ### M0: Foundations (D1 · Mon 28 Sep)
 **Goal:** everyone can `make up` an empty but healthy stack. Contracts are frozen.
-- [ ] Repo skeleton per CLAUDE.md repo map. Git init, `.gitignore` (`data/`, `.env`, `node_modules`, `.venv`).
-- [ ] `docker-compose.yml` with redpanda, redpanda-console, clickhouse, grafana, caddy, all with healthchecks (spec 09).
-- [ ] `infra/redpanda/create-topics.sh` creates the 6 topics (spec 02).
-- [ ] `scripts/prepare_data.py` + `make data`. **Verify** that `TLC_MONTH=2025-10` is downloadable and inspect its columns. Pick `REPLAY_START_TS` (a busy Tue 07:00) (spec 01).
-- [ ] Pin every version in ARCHITECTURE §9.
+- [x] Repo skeleton per CLAUDE.md repo map. Git init, `.gitignore` (`data/`, `.env`, `node_modules`, `.venv`).
+- [x] `docker-compose.yml` with redpanda, redpanda-console, clickhouse, grafana, caddy, all with healthchecks (spec 09).
+- [x] `infra/redpanda/create-topics.sh` creates the 6 topics (spec 02).
+- [x] `scripts/prepare_data.py` + `make data`. **Verify** that `TLC_MONTH=2025-10` is downloadable and inspect its columns. Pick `REPLAY_START_TS` (a busy Tue 07:00) (spec 01).
+- [x] Pin every version in ARCHITECTURE §9.
 - [ ] Install Ollama natively and pull 2–3 candidate models (spec 06 §Model selection).
 - [ ] Ask IT about the internal AI gateway: base URL, key, model name, and data policy.
 - [ ] Order or borrow: travel router, HDMI screen or TV, tablet, extension cord.
@@ -68,17 +68,17 @@ gantt
 **Exit:** `make data && make up` is green. `rpk topic list` shows the 6 topics. Parquet and `zones.csv` exist.
 
 ### M1: Core pipeline (D2–D4)
-- [ ] **A** ClickHouse DDL + users/profiles (`infra/clickhouse/init/*.sql`, `users.d/*.xml`) and the zones loader (spec 04).
-- [ ] **A** Replayer: pacing with a fake-clock unit test, producer, `sim.clock`, state file, control API, backfill mode (spec 01).
-- [ ] **A** Processor: validation rules (TDD), enrichment (TDD), branching, ClickHouse sinks for trips and rejects (spec 03).
-- [ ] **B** Start the api skeleton in parallel: FastAPI app, config, ClickHouse clients, `/api/healthz`, `/api/zones`, `/api/sim/clock`.
+- [x] **A** ClickHouse DDL + users/profiles (`infra/clickhouse/init/*.sql`, `users.d/*.xml`) and the zones loader (spec 04).
+- [x] **A** Replayer: pacing with a fake-clock unit test, producer, `sim.clock`, state file, control API, backfill mode (spec 01).
+- [x] **A** Processor: validation rules (TDD), enrichment (TDD), branching, ClickHouse sinks for trips and rejects (spec 03).
+- [ ] **B** *(moved to the M3 plan)* Start the api skeleton in parallel: FastAPI app, config, ClickHouse clients, `/api/healthz`, `/api/zones`, `/api/sim/clock`.
 
 **Exit:** at 60×, `SELECT count() FROM taxi.trips` grows by about 80–200 rows/s. Rejected rows appear with reasons. Freshness is `now64() - max(stored_at)` < 3 s.
 
 ### M2: Aggregates + dashboard (D4–D6)
-- [ ] **A** 1-minute tumbling window per `pu_borough` → `agg.borough_minute` → sink (spec 03).
+- [x] **A** 1-minute tumbling window per `pu_borough` → `agg.borough_minute` → sink (spec 03).
 - [ ] **C** Grafana provisioning: datasource plus the "NYC Taxi Live" and "Stand Health" dashboards (spec 05).
-- [ ] **A** First backfill run (up to day 8), to check that the backfill works and to measure how long it takes.
+- [x] **A** First backfill run (up to day 8), to check that the backfill works and to measure how long it takes.
 
 **Exit:** the dashboard updates every 5 s with no errors. The geomap shows zones. The rejected-reasons panel is populated.
 

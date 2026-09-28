@@ -155,7 +155,7 @@ The fare estimator and amount calculation are pure functions (TDD).
 | `submitted` | 1 | api | request accepted | `pickup_zone, dropoff_zone, payment, tip_amount, estimate_method` | "Your phone sent the ride to our API." |
 | `ingested` | 2 | api / replayer | broker acknowledged | `topic, partition, offset` | "Safely stored in Redpanda: topic `trips.raw`, partition {p}, offset {o}. It can't get lost now." |
 | `validated` | 3 | processor | all rules passed | `rules_checked` | "The stream processor checked {n} data-quality rules. All passed ✓" |
-| `rejected` | 3 | processor | a rule failed (terminal) | `reasons[]` | "Rejected: {reason}. Real pipelines reject ~3% of NYC trips for problems like this. Try a normal tip!" |
+| `rejected` | 3 | processor | a rule failed (terminal) | `reasons[]` | "Rejected: {reason}. Our pipeline rejects about 1 in 10 real NYC trips for problems like this. Try a normal tip!" |
 | `enriched` | 4 | processor | enrichment done | `pu_zone, pu_borough, do_zone, do_borough, tip_pct, duration_min` | "Added zone and borough names, and worked out your tip ({tip_pct}%) and duration." |
 | `aggregated` | 5 | processor | entered its window | `window_start, borough` | "Counted in the {borough} · {HH:MM} bucket on the live dashboard." |
 | `stored` | 6 | processor | ClickHouse insert OK | `table, batch_rows` | "Written to ClickHouse (`taxi.trips`) in a batch of {batch_rows} trips." |

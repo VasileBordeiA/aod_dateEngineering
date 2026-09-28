@@ -1,6 +1,6 @@
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from contract_validator import assert_valid
@@ -13,7 +13,7 @@ from replayer.state import load_state
 
 
 def wall():
-    return datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc)
+    return datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
 
 
 class FakeOut:
@@ -151,3 +151,14 @@ def test_housekeeping_heartbeat_state_and_clock(tmp_path, replay_parquet, mono):
 def test_fresh_start_seeks_to_start_ts(tmp_path, replay_parquet, mono):
     rep, _ = make(tmp_path, replay_parquet, mono, REPLAY_START_TS="2025-10-07T07:05:00")
     assert rep.state.row_idx == 10
+
+
+def test_run_flushes_after_the_final_clock_message(tmp_path, replay_parquet, mono):
+    """The last heartbeat must not be left in the producer queue when the process exits."""
+    rep, out = make(tmp_path, replay_parquet, mono, REPLAY_SPEED="max", REPLAY_UNTIL_TS="2025-10-07T07:04:00")
+    ops: list[str] = []
+    send, flush = out.send, out.flush
+    out.send = lambda topic, *a, **kw: (ops.append(f"send:{topic}"), send(topic, *a, **kw))[1]
+    out.flush = lambda timeout=30.0: (ops.append("flush"), flush(timeout))[1]
+    rep.run(threading.Event())
+    assert ops[-1] == "flush" and "send:sim.clock" in ops[:-1]

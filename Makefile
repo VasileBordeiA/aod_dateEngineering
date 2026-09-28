@@ -67,7 +67,8 @@ backfill: ## Replay at max speed through the real pipeline: make backfill UNTIL=
 	$(COMPOSE) stop replayer
 	$(COMPOSE) run --rm --no-deps -e REPLAY_SPEED=max -e REPLAY_UNTIL_TS=$(UNTIL) replayer
 	@echo "waiting for processor lag to reach 0…"
-	@until [ "$$($(COMPOSE) exec -T redpanda rpk group describe $(PROCESSOR_CONSUMER_GROUP) | awk '/^TOTAL-LAG/{print $$2}')" = "0" ]; do sleep 5; done
+	@# only the pipeline topics: Quix's changelog topic always shows "lag" (it is not consumed by the group)
+	@until [ "$$($(COMPOSE) exec -T redpanda rpk group describe $(PROCESSOR_CONSUMER_GROUP) | awk '$$1=="trips.raw"||$$1=="trips.enriched"{s+=$$6} END{print s+0}')" = "0" ]; do sleep 5; done
 	$(COMPOSE) start replayer
 
 pause: ## Pause the replayer (sim clock freezes)

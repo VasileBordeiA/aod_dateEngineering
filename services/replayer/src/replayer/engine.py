@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable, Iterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -34,7 +34,7 @@ class Out(Protocol):
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Replayer:
@@ -218,7 +218,7 @@ class Replayer:
                 self.relieve_backpressure()
             elif produced == 0:
                 time.sleep(IDLE_SLEEP_S)
+        self.housekeeping(force=True)  # final heartbeat + state, then flush so nothing is left queued
         self.out.flush(30)
-        self.housekeeping(force=True)
         event("stop", sim_ts=self.clock.now(), loop=self.state.loop, row_idx=self.state.row_idx,
               sent_total=self.sent_total)

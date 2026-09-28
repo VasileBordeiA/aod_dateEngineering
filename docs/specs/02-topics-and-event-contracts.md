@@ -29,7 +29,8 @@ flowchart LR
         clk[(sim.clock)]
     end
     subgraph processor[processor · Quix Streams]
-        V[validate] --> E[enrich] --> W[1-min tumbling window<br/>per pu_borough]
+        V[validate] --> E[enrich]
+        W[1-min tumbling window<br/>per pu_borough]
         S1[ClickHouse sink<br/>trips]
         S2[ClickHouse sink<br/>rejected]
         S3[ClickHouse sink<br/>aggregates]
@@ -53,6 +54,7 @@ flowchart LR
     raw --> V
     V -- invalid --> rej --> S2 --> T2
     E --> enr
+    enr --> W
     E --> S1 --> T1
     W --> agg --> S3 --> T3
     V -.-> tr
@@ -69,27 +71,33 @@ flowchart LR
 <!-- diagrams:end -->
 
 ## Config
-`KAFKA_BROKERS` (all clients), `TOPIC_RETENTION_MS` (default 21 600 000 = 6 h, used by `create-topics.sh`).
+`KAFKA_BROKERS` (all clients), `TOPIC_RETENTION_BYTES` (default 1 073 741 824 = 1 GiB **per partition**, used by `create-topics.sh`).
 
 ## Topics
 | Topic | Partitions | Key | Retention / cleanup | Producers | Consumers | Schema |
 |---|---|---|---|---|---|---|
-| `trips.raw` | 3 | `trip_id` | delete, 6 h | replayer, api (rides) | processor | [trip](../../contracts/events/trip.schema.json) |
-| `trips.enriched` | 3 | `trip_id` | delete, 6 h | processor | (Console / future use) | [enriched_trip](../../contracts/events/enriched_trip.schema.json) |
-| `trips.rejected` | 3 | `trip_id` | delete, 6 h | processor | processor (rejects sink) | [rejected_trip](../../contracts/events/rejected_trip.schema.json) |
-| `agg.borough_minute` | 3 | `borough` | delete, 6 h | processor | processor (agg sink) | [borough_minute_agg](../../contracts/events/borough_minute_agg.schema.json) |
-| `trace.checkpoints` | 3 | `trace_id` | delete, 6 h | api, replayer, processor | api (relay), ClickHouse Kafka engine | [trace_checkpoint](../../contracts/events/trace_checkpoint.schema.json) |
+| `trips.raw` | **1** | `trip_id` | delete, 1 GiB | replayer, api (rides) | processor | [trip](../../contracts/events/trip.schema.json) |
+| `trips.enriched` | **1** | `trip_id` | delete, 1 GiB | processor | (Console / future use) | [enriched_trip](../../contracts/events/enriched_trip.schema.json) |
+| `trips.rejected` | 3 | `trip_id` | delete, 1 GiB | processor | processor (rejects sink) | [rejected_trip](../../contracts/events/rejected_trip.schema.json) |
+| `agg.borough_minute` | 3 | `borough` | delete, 1 GiB | processor | processor (agg sink) | [borough_minute_agg](../../contracts/events/borough_minute_agg.schema.json) |
+| `trace.checkpoints` | 3 | `trace_id` | delete, 1 GiB | api, replayer, processor | api (relay), ClickHouse Kafka engine | [trace_checkpoint](../../contracts/events/trace_checkpoint.schema.json) |
 | `sim.clock` | 1 | `"clock"` | **compact** | replayer | api | [sim_clock](../../contracts/events/sim_clock.schema.json) |
 
 Quix Streams also creates internal topics (`repartition__…` and `changelog__…`) for `group_by` and window state. Allow auto-creation for the processor's consumer group only, or pre-create them. **Don't delete these topics while the processor has state.**
 
 Bootstrap:
 ```bash
-rpk topic create trips.raw trips.enriched trips.rejected agg.borough_minute trace.checkpoints \
-  -p 3 -r 1 -c retention.ms=${TOPIC_RETENTION_MS} -c cleanup.policy=delete
+rpk topic create trips.raw trips.enriched -p 1 -r 1                                   # ordered event time (ADR-014)
+rpk topic create trips.rejected agg.borough_minute trace.checkpoints -p 3 -r 1
+# every delete-policy topic: size-based retention (ADR-015)
+rpk topic alter-config <topic> --set retention.ms=-1 --set retention.bytes=${TOPIC_RETENTION_BYTES}
 rpk topic create sim.clock -p 1 -r 1 -c cleanup.policy=compact
 ```
-The script is idempotent: it ignores `TOPIC_ALREADY_EXISTS`.
+The script is idempotent. It ignores `TOPIC_ALREADY_EXISTS` and re-applies the config to existing topics.
+
+**Why 1 partition and size retention:**
+- **1 partition (ADR-014).** With 3 partitions consumed concurrently, pickup times went backwards by up to about 450 sim-seconds after the `group_by`, and windows dropped them as late.
+- **Size retention (ADR-015).** The processor writes records with their event-time (2025) timestamps, so 6 h time-based retention deleted fresh data immediately.
 
 ## Behaviour
 

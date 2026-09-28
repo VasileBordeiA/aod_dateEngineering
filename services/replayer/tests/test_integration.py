@@ -7,10 +7,10 @@ import time
 import pytest
 from confluent_kafka import Consumer
 from confluent_kafka.admin import AdminClient, NewTopic
+from conftest import make_replay_parquet
 from contract_validator import assert_valid
 from testcontainers.kafka import RedpandaContainer
 
-from conftest import make_replay_parquet
 from replayer.config import Config
 from replayer.engine import Replayer
 from replayer.producer import KafkaOut

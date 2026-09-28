@@ -28,7 +28,7 @@ The same `.env` as the stack. The eval harness talks to the **running api** (`ht
 |---|---|---|---|---|
 | Unit (pure) | pacing with a fake clock, loop offset, trip_id, sampling | every validation rule, enrichment, reducer | SQL guard (attack list + must-pass), fare estimator, SSE encoder, rate limiter, provider failover state machine | SSE parser, chart spec → Recharts props, formatters |
 | Contract | produced messages vs `trip.schema.json` | output messages vs schemas | rides message, checkpoints vs schemas | generated types compile |
-| Integration (testcontainers: Redpanda + ClickHouse) | restart → deduped | 1 000 fixture trips → exact counts, checkpoint order, ClickHouse outage | agent loop with a **scripted fake LLM** (an OpenAI-compatible stub server) → exact SSE sequence; rides → WS stages | n/a |
+| Integration (testcontainers: Redpanda + ClickHouse with the real init SQL and users; the processor runs as a subprocess) | restart → deduped | 1 000 fixture trips → exact counts, checkpoint order, ClickHouse outage | agent loop with a **scripted fake LLM** (an OpenAI-compatible stub server) → exact SSE sequence; rides → WS stages | n/a |
 | E2E (running stack) | n/a | n/a | ride through Caddy, all 7 stages < 5 s; agent answer with the real model | Playwright on phone viewports against the stack |
 
 The fake LLM is a tiny FastAPI app that returns scripted `chat.completions` responses (tool calls, then a final answer). Use it for deterministic agent-loop tests, and in CI where there's no model.

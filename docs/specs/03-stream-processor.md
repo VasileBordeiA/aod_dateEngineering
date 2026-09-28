@@ -31,7 +31,7 @@ flowchart LR
     rej --> rejs[["sink → taxi.trips_rejected"]]
     enr --> enrt[(trips.enriched)]
     enr --> ts[["sink → taxi.trips"]]
-    enr --> gb["group_by pu_borough"] --> win["tumbling window 1 min<br/>grace 180 s (sim)"] --> red["reduce → final"]
+    enrt --> gb["group_by pu_borough"] --> win["tumbling window 1 min<br/>grace 180 s (sim)"] --> red["reduce → final"]
     red --> aggt[(agg.borough_minute)]
     red --> aggs[["sink → taxi.agg_borough_minute"]]
     ann -.->|"traced: validated / rejected"| tr[(trace.checkpoints)]
@@ -94,7 +94,7 @@ valid[valid.apply(lambda v: v["trace_id"] is not None)] \
     .apply(checkpoints_enriched_and_aggregated, expand=True) \
     .to_topic(trace_topic, key=lambda v: v["trace_id"])
 
-agg = (valid.group_by("pu_borough")
+agg = (app.dataframe(enriched_topic).group_by("pu_borough")   # second input: the enriched stream
             .tumbling_window(timedelta(minutes=1), grace_ms=timedelta(seconds=PROCESSOR_WINDOW_GRACE_S))
             .reduce(reducer=add_trip, initializer=init_bucket)
             .final()
@@ -102,7 +102,7 @@ agg = (valid.group_by("pu_borough")
 agg.to_topic(agg_topic)
 agg.sink(agg_sink)
 ```
-This is a sketch: adapt it to the pinned Quix version's branching API. The rules are **one pure function per concern**, and `app.py` should stay under about 120 lines.
+This is a sketch; the implementation is `services/processor/src/processor/app.py`. The aggregation reads `trips.enriched` as a second StreamingDataFrame (ADR-013). The rules are **one pure function per concern**, and `app.py` should stay under about 120 lines.
 
 ### Validation rules (`annotate_reasons`)
 Evaluate **all** rules and collect every failing code, so the dashboard can show the full picture.
@@ -121,7 +121,7 @@ Evaluate **all** rules and collect every failing code, so the dashboard can show
 | `TIP_NEGATIVE` | `tip_amount < 0` | refunds |
 | `TIP_UNREALISTIC` | `tip_amount > max(PROCESSOR_TIP_MAX_ABS, 3 × fare_amount)` | lets students trigger a rejection with an absurd tip |
 
-The data-prep report (spec 01) uses the **same function**. Import it from a shared `rules.py`. Expect roughly 2–5% of real trips to be rejected, which is a good talking point.
+The data-prep report (spec 01) uses the **same function**. Import it from a shared `rules.py`. October 2025 measures **about 10–11% rejected**. Most are `FARE_NON_POSITIVE` on *Flex Fare* trips (payment_type 0, 22% of all trips), which carry a negative `fare_amount`. That's a great talking point about a source changing its conventions.
 
 ### Enrichment (`enrich`)
 | Field | Formula |
@@ -142,7 +142,8 @@ The data-prep report (spec 01) uses the **same function**. Import it from a shar
 - `to_agg_record` computes `avg_fare = fare_sum/trips`, `avg_distance`, and `avg_card_tip_pct = card_tip_pct_sum/card_tip_pct_n` (or `null`). It formats `window_start`/`window_end` from epoch ms back to naive ISO, and adds `borough` (the group key) and `emitted_at`.
 - Windows close when the partition's observed event time passes `end + grace`.
   - At 60×, the 180 sim-second grace is about 3 wall seconds.
-  - Records later than that are dropped by Quix. Log each as `late_record` with the trip_id; the expected count is 0.
+  - Records later than that are dropped by Quix. Log each as `late_record` with the trip_id; the expected count is 0 (the event-time topics are single-partition, ADR-014).
+  - Windows close **per key**. A borough's window closes when that borough sees a newer trip, so rare boroughs (EWR) show up in `agg_borough_minute` late. This is expected.
 
 ### ClickHouse sinks
 - Each sink is a `quixstreams.sinks.BatchingSink` subclass wrapping `clickhouse_connect.get_client(...)` with `ingest_writer`.

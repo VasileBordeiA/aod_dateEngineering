@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from processor.times import parse_sim, parse_wall
@@ -30,7 +30,7 @@ WALL_COLUMNS = {"produced_at", "processed_at", "rejected_at", "emitted_at"}
 def _sim(v: Any) -> datetime | None:
     """Naive sim time → aware UTC with the same wall values, so the host timezone can never shift it."""
     dt = parse_sim(v)
-    return dt.replace(tzinfo=timezone.utc) if dt is not None else None
+    return dt.replace(tzinfo=UTC) if dt is not None else None
 
 
 def _row(v: Mapping[str, Any], columns: tuple[str, ...]) -> list[Any]:
@@ -39,7 +39,7 @@ def _row(v: Mapping[str, Any], columns: tuple[str, ...]) -> list[Any]:
         x = v.get(c)
         if c in SIM_COLUMNS:
             x = _sim(x)
-        elif c in WALL_COLUMNS:
+        elif c in WALL_COLUMNS and isinstance(x, str):
             x = parse_wall(x)
         elif c == "trace_id":
             x = uuid.UUID(x) if x else None

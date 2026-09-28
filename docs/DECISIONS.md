@@ -141,3 +141,42 @@ Format: context → decision → consequences → alternatives rejected. To chan
 **Decision:** The agent uses SSE: one request, many ordered step events, and it works with a plain POST via `fetch` streaming. Traces use WebSocket, a long-lived subscription per trace or for the live wall.
 
 **Consequences:** Caddy must not buffer either (`flush_interval -1`).
+
+## ADR-013: Aggregation reads `trips.enriched`; implementation notes from M1
+**Status:** accepted · 2026-09-28
+
+**Context:** Building M1 with Quix Streams 3.26.
+
+**Decision:**
+- The windowed aggregation is a second StreamingDataFrame on `trips.enriched`, not a `group_by` branch off the validated stream. Branching, `group_by`, and windows then never interact.
+- `avg_speed_mph` is rounded to 2 decimals.
+- The processor integration test runs the processor as a subprocess against testcontainers Redpanda and ClickHouse, the latter with the real init SQL and users.
+- `agent_ro` keeps `readonly=1`, which clickhouse-connect handles. Its hard row cap is `max_result_rows=5000` with `throw`:
+  - `break` is block-granular and let 10 000 rows through a 500 cap.
+  - clickhouse-connect reads about 1.5 k rows of `system.settings` when it connects.
+  - The SQL guard's `LIMIT 200` is the normal limit.
+- The Grafana datasource sets `queryTimeout: 15`, because the plugin's default violates the profile constraint (≤ 30).
+- Trace checkpoints are ordered by `seq`, not by arrival. `stored` comes from a second producer right after the INSERT and can overtake the checkpoints Quix flushes at commit.
+- Windows close **per key**, so rare boroughs (EWR) are aggregated late.
+
+**Consequences:** The aggregates are computed from exactly what is stored in `taxi.trips`. There is one extra consumer of `trips.enriched`, which is negligible.
+
+## ADR-014: `trips.raw` and `trips.enriched` are single-partition
+**Status:** accepted · 2026-09-28 · supersedes the "3 partitions" line in spec 02
+
+**Context:** With 3 partitions consumed concurrently, `pickup_ts` went backwards by up to ~450 sim-seconds after the `group_by` repartition. Quix dropped those records as late. At 60× a 180 s grace hides most of it, but a max-speed backfill silently lost aggregates. The integration test caught it.
+
+**Decision:** The two event-time streams have exactly one partition. The other topics keep 3.
+
+**Consequences:**
+- Event time stays strictly ordered from the replayer into the windows. No late records were observed in a 283 k-row backfill.
+- The throughput ceiling is one partition (well above 10 k msg/s), which is irrelevant at about 200 msg/s. One processor consumes everything anyway.
+
+## ADR-015: Size-based topic retention
+**Status:** accepted · 2026-09-28 · supersedes "6 h retention"
+
+**Context:** The processor writes records with their event-time timestamps (October 2025). Time-based retention (`retention.ms=6 h`) therefore deleted freshly written `trips.enriched` segments immediately. The aggregation consumer hit "offset out of range" and lost data.
+
+**Decision:** Every delete-policy topic uses `retention.ms=-1` with `retention.bytes=1 GiB` per partition (`TOPIC_RETENTION_BYTES`). `create-topics.sh` converges existing topics to this config.
+
+**Consequences:** Retention no longer depends on timestamps. Worst case this is about 9 GiB of broker disk (9 partitions). ClickHouse remains the system of record.

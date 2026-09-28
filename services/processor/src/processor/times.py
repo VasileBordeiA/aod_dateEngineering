@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -23,22 +23,22 @@ def format_sim(dt: datetime) -> str:
 
 
 def format_wall(dt: datetime) -> str:
-    utc = dt.astimezone(timezone.utc)
+    utc = dt.astimezone(UTC)
     return utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"
 
 
 def parse_wall(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(UTC)
 
 
 def wall_now_str() -> str:
-    return format_wall(datetime.now(timezone.utc))
+    return format_wall(datetime.now(UTC))
 
 
 def sim_epoch_ms(dt: datetime) -> int:
     """Event time for Quix windows: the naive sim time read as if it were UTC."""
-    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    return int(dt.replace(tzinfo=UTC).timestamp() * 1000)
 
 
 def sim_from_epoch_ms(ms: int) -> datetime:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).replace(tzinfo=None)
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).replace(tzinfo=None)

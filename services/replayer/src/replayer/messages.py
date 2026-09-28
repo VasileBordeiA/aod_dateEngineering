@@ -6,7 +6,7 @@ import hashlib
 import math
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 TRACE_NAMESPACE = uuid.UUID("6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f")
@@ -17,7 +17,7 @@ def format_sim(dt: datetime, *, millis: bool = False) -> str:
 
 
 def format_wall(dt: datetime) -> str:
-    utc = dt.astimezone(timezone.utc)
+    utc = dt.astimezone(UTC)
     return utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"
 
 

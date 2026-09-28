@@ -14,11 +14,10 @@ import clickhouse_connect
 import pytest
 from confluent_kafka import Consumer, Producer
 from confluent_kafka.admin import AdminClient, NewTopic
+from conftest import FIXTURES, REPO
 from contract_validator import assert_valid
 from testcontainers.core.container import DockerContainer
 from testcontainers.kafka import RedpandaContainer
-
-from conftest import FIXTURES, REPO
 
 pytestmark = pytest.mark.integration
 RP_IMAGE = "redpandadata/redpanda:v26.2.3"
@@ -36,7 +35,7 @@ def wait_for(fn, timeout=120.0, what="condition"):
             result = fn()
             if result:
                 return result
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             last = e
         time.sleep(1)
     raise AssertionError(f"timed out waiting for {what} (last error: {last!r})")

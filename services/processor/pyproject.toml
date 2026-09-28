@@ -22,9 +22,17 @@ markers = ["integration: needs Docker (testcontainers)"]
 addopts = "-m 'not integration'"
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py312"
+
+[tool.ruff.lint]
+# Explicit set: ruff's defaults changed in 0.16. No DTZ: sim time is naive by design (ARCHITECTURE §4).
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # ×, –, → in user-facing text are intentional
 
 [tool.mypy]
 strict = true
 ignore_missing_imports = true
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["E501"]  # table-like fixture data reads better unwrapped

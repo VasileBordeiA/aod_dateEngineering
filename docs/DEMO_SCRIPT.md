@@ -37,7 +37,7 @@ These texts are also the drawer copy on `/architecture` (spec 08). Keep them in 
 
 **Stream processor (Quix Streams, Python)**
 - Three jobs: **clean** (11 data-quality rules), **enrich** (zone names, tip %), and **aggregate** (trips per borough per minute).
-- About 2–5% of real NYC trips fail validation: refunds recorded as negative fares, meters left running, trips of 0 miles. We keep them in a separate table with the reason, and never silently delete them.
+- About 1 in 10 real NYC trips fail validation. Most are "Flex Fare" trips that record a *negative* fare, plus refunds, meters left running, and trips of 0 miles. We keep them in a separate table with the reason, and never silently delete them.
 - *Takeaway:* garbage in, garbage out. Cleaning is most of the job.
 
 **ClickHouse**

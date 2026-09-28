@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from processor.times import format_sim, format_wall, parse_sim, parse_wall, sim_epoch_ms, sim_from_epoch_ms
 
@@ -6,7 +6,7 @@ from processor.times import format_sim, format_wall, parse_sim, parse_wall, sim_
 def test_parse_sim_variants():
     assert parse_sim("2025-10-07T08:14:03") == datetime(2025, 10, 7, 8, 14, 3)
     assert parse_sim("2025-10-07T08:14:03.250") == datetime(2025, 10, 7, 8, 14, 3, 250_000)
-    assert parse_sim(datetime(2025, 10, 7, tzinfo=timezone.utc)) == datetime(2025, 10, 7)
+    assert parse_sim(datetime(2025, 10, 7, tzinfo=UTC)) == datetime(2025, 10, 7)
     assert parse_sim("yesterday") is None and parse_sim(None) is None and parse_sim(12) is None
 
 
@@ -16,7 +16,7 @@ def test_format_sim():
 
 
 def test_wall_roundtrip():
-    dt = datetime(2026, 10, 16, 8, 2, 11, 482_000, tzinfo=timezone.utc)
+    dt = datetime(2026, 10, 16, 8, 2, 11, 482_000, tzinfo=UTC)
     assert format_wall(dt) == "2026-10-16T08:02:11.482Z"
     assert parse_wall("2026-10-16T08:02:11.482Z") == dt
 

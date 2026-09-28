@@ -28,7 +28,9 @@ class KafkaOut:
             if err is not None:
                 event("delivery_failed", topic=topic, key=key, error=str(err))
             elif on_delivery is not None:
-                on_delivery(msg.partition(), msg.offset())
+                partition, offset = msg.partition(), msg.offset()
+                if partition is not None and offset is not None:
+                    on_delivery(partition, offset)
 
         self._p.produce(topic, key=key.encode(), value=json.dumps(value, separators=(",", ":")).encode(),
                         on_delivery=callback)

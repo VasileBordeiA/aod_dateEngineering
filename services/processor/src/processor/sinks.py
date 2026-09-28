@@ -30,7 +30,7 @@ class ClickHouseSink(BatchingSink):
     def setup(self) -> None:
         try:
             self._client = self._client_factory()
-        except Exception as e:  # noqa: BLE001 — ClickHouse may start after us; write() retries
+        except Exception as e:
             event("clickhouse_unavailable", table=self._table, error=str(e)[:200])
 
     def write(self, batch: SinkBatch) -> None:
