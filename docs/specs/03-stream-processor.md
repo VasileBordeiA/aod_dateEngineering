@@ -131,7 +131,7 @@ The data-prep report (spec 01) uses the **same function**. Import it from a shar
 | `is_card` | `payment_type == 1` |
 | `is_airport` | pickup or dropoff ∈ {1, 132, 138} |
 | `duration_min` | `(dropoff_ts − pickup_ts)` in minutes, 2 decimals |
-| `avg_speed_mph` | `trip_distance / (duration_min / 60)` if `duration_min ≥ 1`, else `null`. 1 decimal |
+| `avg_speed_mph` | `trip_distance / (duration_min / 60)` if `duration_min ≥ 1`, else `null`. 2 decimals, computed from the unrounded duration |
 | `tip_pct` | `100 × tip_amount / fare_amount` if `is_card` and `fare_amount > 0`, else `null`. 2 decimals |
 | `pickup_hour` | hour of `pickup_ts` (0–23) |
 | `pickup_dow` | ISO weekday of `pickup_ts` (1 = Mon) |

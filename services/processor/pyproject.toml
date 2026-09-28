@@ -1,0 +1,30 @@
+[project]
+name = "nyctaxi-processor"
+version = "0.1.0"
+description = "Quix Streams processor: validate, enrich, aggregate, sink to ClickHouse (spec 03)"
+requires-python = ">=3.12,<3.13"
+dependencies = ["quixstreams==3.26.0", "clickhouse-connect==1.9.0"]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "jsonschema==4.26.0", "referencing==0.37.0", "ruff==0.16.9", "mypy==2.3.1",
+       "testcontainers[kafka]==4.15.0"]
+
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/processor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs Docker (testcontainers)"]
+addopts = "-m 'not integration'"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true

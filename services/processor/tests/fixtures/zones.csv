@@ -1,0 +1,13 @@
+location_id,borough,zone,service_zone,lat,lon
+1,EWR,Newark Airport,EWR,40.6895,-74.1745
+5,Staten Island,Arden Heights,Boro Zone,40.5504,-74.1860
+7,Queens,Astoria,Boro Zone,40.7610,-73.9196
+69,Bronx,East Concourse/Concourse Village,Boro Zone,40.8288,-73.9197
+132,Queens,JFK Airport,Airports,40.6413,-73.7781
+138,Queens,LaGuardia Airport,Airports,40.7769,-73.8740
+161,Manhattan,Midtown Center,Yellow Zone,40.7580,-73.9776
+230,Manhattan,Times Sq/Theatre District,Yellow Zone,40.7590,-73.9845
+237,Manhattan,Upper East Side South,Yellow Zone,40.7680,-73.9620
+255,Brooklyn,Williamsburg (North Side),Boro Zone,40.7180,-73.9570
+264,Unknown,NV,N/A,,
+265,N/A,Outside of NYC,N/A,,
