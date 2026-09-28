@@ -1,0 +1,30 @@
+[project]
+name = "nyctaxi-tools"
+version = "0.1.0"
+description = "Repo-level scripts and tests (data prep, contracts, infra checks)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "duckdb==1.5.5",
+    "pyarrow==25.0.1",
+    "geopandas==1.1.4",
+    "jsonschema==4.26.0",
+    "referencing==0.37.0",
+    "pyyaml==6.0.3",
+    "clickhouse-connect==1.9.0",
+    "confluent-kafka==2.15.1",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.16.9", "chdb==4.4.0"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["contracts/tests", "scripts/tests", "infra/tests"]
+markers = ["stack: needs the running compose stack (make up)"]
+addopts = "-m 'not stack'"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
