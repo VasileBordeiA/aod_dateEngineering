@@ -167,6 +167,7 @@ The state machine is in [DIAGRAMS §5](../DIAGRAMS.md#5-trace-checkpoint-stages-
 - **Consumer.** A background consumer of `trace.checkpoints` and `sim.clock`.
   - Group id `api-relay-<random>` with `auto.offset.reset=latest` and no commits: every api instance sees everything from "now".
   - It runs in a thread and hands messages to the asyncio loop.
+- **Ordering.** Checkpoints of one trace can arrive out of order on the topic. `stored` is produced by a second producer right after the INSERT, while the processor's other checkpoints are flushed at the Quix commit. The relay and UI therefore **order by `seq`**, never by arrival, and compute latency from `at`.
 - **History.** An in-memory dict `trace_id → [checkpoints]` with a TTL of `TRACE_HISTORY_TTL_S` and max 20 k traces (LRU).
   - On WS connect, if the trace isn't in memory (for example after an api restart), load it from `SELECT … FROM taxi.trace_events WHERE trace_id = {id:UUID} ORDER BY seq, at`.
   - Merge and dedup by `(stage)`.

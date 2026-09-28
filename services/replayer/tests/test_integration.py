@@ -35,7 +35,7 @@ def consume_all(bootstrap: str, topic: str, expected: int, timeout_s: float = 30
 def test_backfill_into_redpanda(tmp_path):
     with RedpandaContainer("redpandadata/redpanda:v26.2.3") as rp:
         bootstrap = rp.get_bootstrap_server()
-        topics = [NewTopic(t, 3, 1) for t in ("trips.raw", "trace.checkpoints")] + [NewTopic("sim.clock", 1, 1)]
+        topics = [NewTopic("trips.raw", 1, 1), NewTopic("trace.checkpoints", 3, 1), NewTopic("sim.clock", 1, 1)]
         admin = AdminClient({"bootstrap.servers": bootstrap})  # keep a reference: futures die with the client
         for f in admin.create_topics(topics).values():
             f.result(30)

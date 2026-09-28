@@ -14,7 +14,11 @@ create() {
   fi
 }
 
-for t in trips.raw trips.enriched trips.rejected agg.borough_minute trace.checkpoints; do
+# Event-time streams are single-partition so pickup_ts stays ordered into the windows (ADR-014).
+for t in trips.raw trips.enriched; do
+  create "$t" -p 1 -r 1 -c "retention.ms=${RETENTION}" -c cleanup.policy=delete
+done
+for t in trips.rejected agg.borough_minute trace.checkpoints; do
   create "$t" -p 3 -r 1 -c "retention.ms=${RETENTION}" -c cleanup.policy=delete
 done
 create sim.clock -p 1 -r 1 -c cleanup.policy=compact

@@ -116,6 +116,31 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  processor:
+    build: services/processor
+    env_file: [.env]
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      CLICKHOUSE_HOST: clickhouse
+      PROCESSOR_STATE_DIR: /state
+      PROCESSOR_ZONES_PATH: /data/zones.csv
+      TZ: UTC
+    depends_on:
+      redpanda-init: { condition: service_completed_successfully }
+      clickhouse: { condition: service_healthy }
+    volumes:
+      - processor-state:/state
+      - ./data/zones.csv:/data/zones.csv:ro
+    healthcheck:
+      test: ["CMD", "python", "-m", "processor.health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 768m
+    restart: unless-stopped
+    logging: *logging
+
   replayer:
     build: services/replayer
     env_file: [.env]
@@ -125,6 +150,7 @@ services:
       TZ: UTC
     depends_on:
       redpanda-init: { condition: service_completed_successfully }
+      processor: { condition: service_healthy }
     ports: ["127.0.0.1:8001:8001"]
     volumes:
       - ./data/replay:/data/replay:ro

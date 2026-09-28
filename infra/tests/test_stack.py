@@ -46,8 +46,9 @@ def test_topics_exist_with_configs():
     a = AdminClient({"bootstrap.servers": "localhost:19092"})
     md = a.list_topics(timeout=10)
     assert TOPICS <= set(md.topics)
-    assert all(len(md.topics[t].partitions) == 3 for t in TOPICS - {"sim.clock"})
-    assert len(md.topics["sim.clock"].partitions) == 1
+    single = {"trips.raw", "trips.enriched", "sim.clock"}  # ordered event time (ADR-014) / compacted clock
+    assert all(len(md.topics[t].partitions) == 1 for t in single)
+    assert all(len(md.topics[t].partitions) == 3 for t in TOPICS - single)
     res = a.describe_configs([ConfigResource("topic", "trips.raw"), ConfigResource("topic", "sim.clock")])
     configs = {r.name: f.result() for r, f in res.items()}
     assert configs["trips.raw"]["retention.ms"].value == "21600000"
