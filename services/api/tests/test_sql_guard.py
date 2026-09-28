@@ -41,6 +41,17 @@ ATTACKS = [
     "SELECT * FROM (SELECT * FROM taxi.trips) SETTINGS max_threads = 64",
     "",
     "   ;  ",
+    # fix round 1: tokenizer errors (TokenError, not a ParseError subclass) must not escape check_sql
+    "SELECT 'abc FROM trips",
+    "SELECT 1 FROM trips /* unterminated",
+    'SELECT "abc FROM trips',
+    # fix round 1: deep nesting under MAX_SQL_CHARS blows the recursion limit while parsing
+    "SELECT " + "(" * 2400 + "1" + ")" * 2400,
+    # fix round 1: CTE-name shadowing must be scope-aware, not a whole-tree name collection
+    "SELECT * FROM agent_log WHERE 1 IN (WITH agent_log AS (SELECT 1) SELECT * FROM agent_log)",
+    "SELECT * FROM agent_log, (WITH agent_log AS (SELECT 1) SELECT * FROM agent_log) AS s",
+    "SELECT * FROM agent_log UNION ALL (WITH agent_log AS (SELECT 1) SELECT * FROM agent_log)",
+    "WITH agent_log AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
 ]
 
 MUST_PASS = [
@@ -102,3 +113,16 @@ def test_length_limit():
     long_sql = "SELECT 1 FROM trips WHERE " + " OR ".join(["1 = 1"] * 2000)
     assert len(long_sql) > MAX_SQL_CHARS
     assert "long" in check_sql(long_sql).reason
+
+
+def test_tokenizer_and_recursion_errors_become_parse_error():
+    # TokenError (unterminated string / comment / quoted identifier) is not a ParseError subclass,
+    # but a realistic input (e.g. an unescaped apostrophe in a zone name) must still surface the
+    # friendly, repairable PARSE_ERROR rather than crash check_sql.
+    assert check_sql("SELECT 'abc FROM trips").reason == PARSE_ERROR
+    assert check_sql("SELECT 1 FROM trips /* unterminated").reason == PARSE_ERROR
+    assert check_sql('SELECT "abc FROM trips').reason == PARSE_ERROR
+    # Deep nesting under MAX_SQL_CHARS can blow the interpreter's recursion limit while parsing.
+    deep_sql = "SELECT " + "(" * 2400 + "1" + ")" * 2400
+    assert len(deep_sql) < MAX_SQL_CHARS
+    assert check_sql(deep_sql).reason == PARSE_ERROR

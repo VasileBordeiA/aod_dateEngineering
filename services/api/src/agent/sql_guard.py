@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import ParseError
+from sqlglot.errors import SqlglotError
 
 logging.getLogger("sqlglot").setLevel(logging.ERROR)  # "falling back to Command" warnings are expected here
 
@@ -39,6 +39,34 @@ def _function_name(node: exp.Func) -> str:
     return (node.name if isinstance(node, exp.Anonymous) else node.sql_name()).lower()
 
 
+def _visible_cte_names(table: exp.Table) -> set[str]:
+    """CTE names an enclosing WITH makes visible to `table`, honouring scope.
+
+    Walk `table`'s ancestors. Each ancestor Select/SetOperation that carries a "with" arg
+    contributes its CTE names, EXCEPT a CTE that is itself an ancestor of `table` (i.e. `table`
+    sits inside that very CTE's own defining subquery). A non-recursive CTE's self-reference
+    resolves to the real table of that name, not to the CTE — so it must not be exempted here.
+    """
+    ancestors: list[object] = []
+    node = table.parent
+    while node is not None:
+        ancestors.append(node)
+        node = node.parent
+    in_scope = {id(a) for a in ancestors}
+    names: set[str] = set()
+    for ancestor in ancestors:
+        if not isinstance(ancestor, exp.Select | exp.SetOperation):
+            continue
+        with_ = ancestor.args.get("with_")
+        if with_ is None:
+            continue
+        for cte in with_.expressions:
+            if id(cte) in in_scope:
+                continue  # table is inside this CTE's own body: self-reference, not a mention
+            names.add(cte.alias_or_name.lower())
+    return names
+
+
 def check_sql(sql: str) -> GuardResult:
     text = sql.strip().rstrip(";").strip()
     if not text:
@@ -47,7 +75,10 @@ def check_sql(sql: str) -> GuardResult:
         return _reject(f"The query is too long (max {MAX_SQL_CHARS} characters). Aggregate instead.")
     try:
         statements = [s for s in sqlglot.parse(text, read="clickhouse") if s is not None]
-    except ParseError:
+    except (SqlglotError, RecursionError):
+        # ParseError and TokenError (unterminated string/comment, bad token) both derive from
+        # SqlglotError. A pathologically nested query can blow the interpreter's recursion limit
+        # during parsing; either way this is a repairable "can't parse it" for the LLM (rule 2).
         return _reject(PARSE_ERROR)
     if len(statements) != 1:
         return _reject("Only one statement is allowed.")
@@ -62,15 +93,15 @@ def check_sql(sql: str) -> GuardResult:
                 return _reject(f"{clause.upper()} clauses are not allowed.")
     if root.find(exp.Into) is not None:
         return _reject("INTO is not allowed.")
-    # Rules 4 + 5: every table is a plain whitelisted name (optionally taxi.), or a CTE name.
-    cte_names = {cte.alias_or_name.lower() for cte in root.find_all(exp.CTE)}
+    # Rules 4 + 5: every table is a plain whitelisted name (optionally taxi.), or a CTE name
+    # visible at that point (scope-aware: a CTE's own self-reference is the real table, not itself).
     for table in root.find_all(exp.Table):
         if not isinstance(table.this, exp.Identifier):
             return _reject(f"Table functions like {table.this.sql('clickhouse')[:40]} are not allowed.")
         name, db = table.name.lower(), table.db.lower()
         if table.catalog or db not in ("", "taxi"):
             return _reject(f"Table {table.sql('clickhouse')} is not available. Use: {TABLE_LIST}.")
-        if not db and name in cte_names:
+        if not db and name in _visible_cte_names(table):
             continue
         if name not in ALLOWED_TABLES:
             return _reject(f"Table {table.sql('clickhouse')} is not available. Use: {TABLE_LIST}.")
