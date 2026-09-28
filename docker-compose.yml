@@ -37,7 +37,7 @@ services:
     entrypoint: ["/bin/bash", "/scripts/create-topics.sh"]
     environment:
       RPK_BROKERS: redpanda:9092
-      TOPIC_RETENTION_MS: ${TOPIC_RETENTION_MS:-21600000}
+      TOPIC_RETENTION_BYTES: ${TOPIC_RETENTION_BYTES:-1073741824}
     volumes: ["./infra/redpanda:/scripts:ro"]
     restart: "no"
     logging: *logging

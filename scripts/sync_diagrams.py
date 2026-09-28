@@ -41,7 +41,8 @@ def diagram(source: str, number: int) -> tuple[str, str]:
 
 
 def render(source: str, numbers: list[int], relative_link: str) -> str:
-    lines = [BEGIN, "## Diagrams", f"*Copied from [DIAGRAMS.md]({relative_link}). Edit there, then run `make diagrams-sync`.*", ""]
+    note = f"*Copied from [DIAGRAMS.md]({relative_link}). Edit there, then run `make diagrams-sync`.*"
+    lines = [BEGIN, "## Diagrams", note, ""]
     for n in numbers:
         title, block = diagram(source, n)
         lines += [f"**§{n} {title}**", "", block, ""]
@@ -59,7 +60,8 @@ def main() -> int:
         link = "../DIAGRAMS.md" if "/specs/" in rel else "DIAGRAMS.md"
         block = render(source, numbers, link)
         if BEGIN in text:
-            new = re.sub(re.escape(BEGIN) + r".*?" + re.escape(END), lambda _: block, text, count=1, flags=re.S)
+            pattern = re.escape(BEGIN) + r".*?" + re.escape(END)
+            new = re.sub(pattern, lambda _, b=block: b, text, count=1, flags=re.S)
         elif anchor in text:
             new = text.replace(anchor, block + "\n\n" + anchor, 1)
         else:

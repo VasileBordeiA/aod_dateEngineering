@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fill_secrets import fill  # noqa: E402
+from fill_secrets import fill
 
 TEMPLATE = """ADMIN_TOKEN=
 CLICKHOUSE_ADMIN_PASSWORD=

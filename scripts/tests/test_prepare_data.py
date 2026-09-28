@@ -10,7 +10,7 @@ import pytest
 from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import prepare_data as prep  # noqa: E402
+import prepare_data as prep
 
 
 def tlc_table(pickups, *, with_cbd: bool = False) -> pa.Table:
