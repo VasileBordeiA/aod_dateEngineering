@@ -1,0 +1,46 @@
+[project]
+name = "nyctaxi-api"
+version = "0.1.0"
+description = "FastAPI: transparent text-to-SQL agent over SSE, sim clock, zones (specs 06, 07)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.54.0",
+    "openai==3.19.2",
+    "sqlglot==30.20.0",
+    "httpx==0.28.1",
+    "clickhouse-connect==1.9.0",
+    "confluent-kafka==2.15.1",
+    "pyyaml==6.0.3",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "jsonschema==4.26.0", "referencing==0.37.0", "ruff==0.16.9", "mypy==2.3.1"]
+
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/api", "src/agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs Docker (testcontainers)"]
+addopts = "-m 'not integration'"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# Explicit set: ruff's defaults changed in 0.16. No DTZ: sim time is naive by design (ARCHITECTURE §4).
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # ×, –, → and … in user-facing text are intentional
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["E501"]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
