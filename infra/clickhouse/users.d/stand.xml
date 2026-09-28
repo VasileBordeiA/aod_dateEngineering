@@ -84,7 +84,7 @@
             <quota>grafana</quota>
             <networks><ip>::/0</ip></networks>
             <!-- Anonymous viewers can send arbitrary SQL through Grafana's query API, so no agent_log (other
-                 visitors' questions) and no system.query_log. Stand Health gets an operator-only datasource (M2). -->
+                 visitors' questions) and no system.*. Stand Health uses grafana_ops in grafana-ops (ADR-017). -->
             <grants>
                 <query>GRANT SELECT ON taxi.trips</query>
                 <query>GRANT SELECT ON taxi.trips_rejected</query>
@@ -92,8 +92,24 @@
                 <query>GRANT SELECT ON taxi.zones</query>
                 <query>GRANT SELECT ON taxi.sim_now</query>
                 <query>GRANT SELECT ON taxi.trace_events</query>
-                <query>GRANT SELECT ON system.parts</query>
             </grants>
         </grafana_ro>
+        <grafana_ops>
+            <password from_env="CLICKHOUSE_OPS_PASSWORD"/>
+            <profile>grafana</profile>
+            <quota>grafana</quota>
+            <networks><ip>::/0</ip></networks>
+            <!-- Only the operator-only grafana-ops container (127.0.0.1:3002, login required) uses this user. -->
+            <grants>
+                <query>GRANT SELECT ON taxi.trips</query>
+                <query>GRANT SELECT ON taxi.trips_rejected</query>
+                <query>GRANT SELECT ON taxi.agg_borough_minute</query>
+                <query>GRANT SELECT ON taxi.sim_now</query>
+                <query>GRANT SELECT ON taxi.trace_events</query>
+                <query>GRANT SELECT ON taxi.agent_log</query>
+                <query>GRANT SELECT ON system.parts</query>
+                <query>GRANT SELECT ON system.query_log</query>
+            </grants>
+        </grafana_ops>
     </users>
 </clickhouse>

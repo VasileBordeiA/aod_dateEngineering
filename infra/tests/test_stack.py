@@ -2,6 +2,7 @@
 
 import json
 import time
+import urllib.error
 import urllib.request
 import uuid
 from base64 import b64encode
@@ -146,7 +147,7 @@ def test_console_is_up():
 
 
 @pytest.mark.parametrize("sql", ["SELECT count() FROM taxi.agent_log", "SELECT count() FROM system.query_log",
-                                 "SELECT count() FROM system.users"])
+                                 "SELECT count() FROM system.users", "SELECT count() FROM system.parts"])
 def test_grafana_ro_cannot_read_visitor_text(sql):
     """Anonymous Grafana viewers can send arbitrary SQL through /grafana/api/ds/query (CLAUDE.md invariant 8)."""
     with pytest.raises(DatabaseError):
@@ -156,5 +157,110 @@ def test_grafana_ro_cannot_read_visitor_text(sql):
 def test_grafana_ro_reads_dashboard_tables():
     g = client("grafana_ro", "CLICKHOUSE_GRAFANA_PASSWORD")
     for t in ["taxi.trips", "taxi.trips_rejected", "taxi.agg_borough_minute", "taxi.zones", "taxi.sim_now",
-              "taxi.trace_events", "system.parts"]:
+              "taxi.trace_events"]:
         g.query(f"SELECT * FROM {t} LIMIT 1")
+
+
+# ── Grafana (spec 05) ─────────────────────────────────────────────────────────
+PUBLIC_GRAFANA = "http://localhost/grafana"  # through Caddy, as a visitor's phone sees it
+OPS_GRAFANA = "http://127.0.0.1:3002"
+DASHBOARDS = ROOT / "infra" / "grafana"
+
+
+def http(method: str, url: str, body: dict | None = None, auth: bool = False) -> tuple[int, dict | list]:
+    headers = {"Content-Type": "application/json"}
+    if auth:
+        headers["Authorization"] = "Basic " + b64encode(f"admin:{env()['GRAFANA_ADMIN_PASSWORD']}".encode()).decode()
+    req = urllib.request.Request(url, method=method, headers=headers,
+                                 data=json.dumps(body).encode() if body is not None else None)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+
+
+def panel_queries(path: Path) -> list[tuple[str, str]]:
+    d = json.loads(path.read_text())
+    return [(p["title"] or f"panel {p['id']}", t["rawSql"]) for p in d["panels"] for t in p.get("targets", [])]
+
+
+def test_public_grafana_home_is_nyc_taxi_live():
+    status, home = http("GET", f"{PUBLIC_GRAFANA}/api/dashboards/home")
+    assert status == 200 and home["dashboard"]["uid"] == "nyc-taxi-live"
+    status, found = http("GET", f"{PUBLIC_GRAFANA}/api/search")
+    assert status == 200 and [d["uid"] for d in found] == ["nyc-taxi-live"]
+
+
+def test_anonymous_viewers_cannot_edit():
+    dashboard = {"dashboard": {"uid": "nyc-taxi-live", "title": "hacked", "panels": []}, "overwrite": True}
+    assert http("POST", f"{PUBLIC_GRAFANA}/api/dashboards/db", dashboard)[0] in (401, 403)
+    assert http("DELETE", f"{PUBLIC_GRAFANA}/api/dashboards/uid/nyc-taxi-live")[0] in (401, 403)
+
+
+def test_public_grafana_has_no_ops_datasource():
+    """ADR-017: in Grafana OSS any viewer can query any datasource by uid, so the ops one must not exist here."""
+    status, settings = http("GET", f"{PUBLIC_GRAFANA}/api/frontend/settings")
+    assert status == 200
+    assert {ds["uid"] for ds in settings["datasources"].values() if "uid" in ds} & {"clickhouse-ops"} == set()
+    query = {"queries": [{"refId": "A", "datasource": {"uid": "clickhouse-ops"}, "rawSql": "SELECT 1",
+                          "format": 1, "queryType": "table"}], "from": "now-1h", "to": "now"}
+    assert http("POST", f"{PUBLIC_GRAFANA}/api/ds/query", query)[0] != 200
+
+
+@pytest.mark.parametrize("name, sql", panel_queries(DASHBOARDS / "provisioning" / "dashboards" / "nyc-taxi-live.json"))
+def test_public_panel_queries_run_through_grafana(name, sql):
+    """What a kiosk browser does every 5 s: anonymous, through Caddy, through the plugin."""
+    query = {"queries": [{"refId": "A", "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+                          "rawSql": sql, "format": 1, "queryType": "table", "editorType": "sql"}],
+             "from": "now-6h", "to": "now"}
+    status, res = http("POST", f"{PUBLIC_GRAFANA}/api/ds/query", query)
+    assert status == 200, name
+    result = res["results"]["A"]
+    assert "error" not in result, f"{name}: {result.get('error')}"
+
+
+def test_zone_outlines_are_served_offline():
+    status, geo = http("GET", f"{PUBLIC_GRAFANA}/public/maps/taxi_zones.geojson")
+    assert status == 200 and geo["type"] == "FeatureCollection" and len(geo["features"]) >= 260
+
+
+def test_ops_grafana_needs_a_login():
+    assert http("GET", f"{OPS_GRAFANA}/api/search")[0] == 401
+    assert http("GET", f"{OPS_GRAFANA}/api/dashboards/uid/stand-health")[0] == 401
+
+
+def test_ops_grafana_serves_stand_health():
+    status, home = http("GET", f"{OPS_GRAFANA}/api/dashboards/home", auth=True)
+    assert status == 200 and home["dashboard"]["uid"] == "stand-health"
+    status, health = http("GET", f"{OPS_GRAFANA}/api/datasources/uid/clickhouse-ops/health", auth=True)
+    assert status == 200 and health["status"] == "OK"
+
+
+def test_grafana_ops_is_read_only():
+    ops = client("grafana_ops", "CLICKHOUSE_OPS_PASSWORD")
+    for t in ["taxi.agent_log", "system.query_log", "system.parts", "taxi.trips", "taxi.sim_now"]:
+        ops.query(f"SELECT * FROM {t} LIMIT 1")
+    for sql in ["INSERT INTO taxi.agent_log (question) VALUES ('x')", "SELECT * FROM system.users",
+                "DROP TABLE taxi.trips"]:
+        with pytest.raises(DatabaseError):
+            ops.query(sql)
+
+
+def all_panel_queries() -> list[tuple[str, str, str, str]]:
+    live = DASHBOARDS / "provisioning" / "dashboards" / "nyc-taxi-live.json"
+    health = DASHBOARDS / "provisioning-ops" / "dashboards" / "stand-health.json"
+    return ([("grafana_ro", "CLICKHOUSE_GRAFANA_PASSWORD", n, q) for n, q in panel_queries(live)]
+            + [("grafana_ops", "CLICKHOUSE_OPS_PASSWORD", n, q) for n, q in panel_queries(health)])
+
+
+@pytest.mark.parametrize("user, password_key, name, sql", all_panel_queries())
+def test_panel_query_is_fast(user, password_key, name, sql):
+    """Spec 05 acceptance 4: < 500 ms server-side on >= 7 backfilled sim days (median of 3, as its own user)."""
+    admin_days = client("admin", "CLICKHOUSE_ADMIN_PASSWORD").query(
+        "SELECT dateDiff('day', min(pickup_ts), max(pickup_ts)) FROM taxi.trips").result_rows[0][0]
+    if admin_days < 7:
+        pytest.skip(f"only {admin_days} sim days loaded; run make backfill first")
+    c = client(user, password_key)
+    elapsed = sorted(int(c.query(sql).summary["elapsed_ns"]) / 1e6 for _ in range(3))
+    assert elapsed[1] < 500, f"{name}: {elapsed[1]:.0f} ms"

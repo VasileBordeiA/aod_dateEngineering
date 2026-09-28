@@ -1,0 +1,1082 @@
+{
+  "uid": "nyc-taxi-live",
+  "title": "NYC Taxi Live",
+  "description": "Big-screen dashboard. Every sim-time panel filters relative to taxi.sim_now, never now() (spec 05).",
+  "tags": [
+    "stand"
+  ],
+  "timezone": "utc",
+  "refresh": "5s",
+  "liveNow": false,
+  "editable": false,
+  "graphTooltip": 0,
+  "style": "dark",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "hidden": true,
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s"
+    ]
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "## Live: NYC yellow taxis\nOctober 2025 replayed at 60×: one data hour per wall minute"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Sim clock (NYC)",
+      "gridPos": {
+        "x": 5,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT formatDateTime(now_ts, '%a %d %b · %H:%i') AS sim_clock FROM taxi.sim_now"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^sim_clock$/"
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 48,
+          "titleSize": 18
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Trips · last sim hour",
+      "gridPos": {
+        "x": 11,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT count() AS trips\nFROM taxi.trips\nWHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 1 HOUR"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 56,
+          "titleSize": 18
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Revenue · last sim hour",
+      "gridPos": {
+        "x": 15,
+        "y": 0,
+        "w": 3,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT round(sum(total_amount)) AS revenue\nFROM taxi.trips\nWHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 1 HOUR"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 56,
+          "titleSize": 18
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Avg fare · last sim hour",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 3,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT round(avg(fare_amount), 2) AS avg_fare\nFROM taxi.trips\nWHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 1 HOUR"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 56,
+          "titleSize": 18
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Rides by visitors today",
+      "gridPos": {
+        "x": 21,
+        "y": 0,
+        "w": 3,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- stored_at is wall time: \"today\" here is the event day, not the sim day.\nSELECT count() AS rides\nFROM taxi.trips\nWHERE source = 'student' AND stored_at >= toStartOfDay(now64(3))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1D9E75"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 56,
+          "titleSize": 18
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "trend",
+      "title": "Trips per minute by borough · last 6 sim hours",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 14,
+        "h": 12
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- Trips per sim minute by pickup borough, last 6 sim hours.\n-- argMax(…, emitted_at) keeps the latest version of a window the processor re-emitted.\nSELECT toUnixTimestamp64Milli(window_start) AS t,\n       sumIf(trips, borough = 'Manhattan') AS `Manhattan`,\n       sumIf(trips, borough = 'Brooklyn') AS `Brooklyn`,\n       sumIf(trips, borough = 'Queens') AS `Queens`,\n       sumIf(trips, borough = 'Bronx') AS `Bronx`,\n       sumIf(trips, borough = 'Staten Island') AS `Staten Island`\nFROM\n(\n    SELECT window_start, borough, argMax(trips, emitted_at) AS trips\n    FROM taxi.agg_borough_minute\n    WHERE window_start >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 6 HOUR\n    GROUP BY window_start, borough\n)\nGROUP BY window_start\nORDER BY window_start"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "lineInterpolation": "linear",
+            "stacking": {
+              "mode": "normal"
+            },
+            "axisBorderShow": false,
+            "axisPlacement": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Manhattan"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3987e5"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Brooklyn"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Queens"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bronx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c98500"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Staten Island"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d55181"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "EWR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#008300"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "t"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "time:HH:mm"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^(Manhattan|Brooklyn|Queens|Bronx|Staten Island)$/"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "t",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "geomap",
+      "title": "Where the taxis are · pickups, last sim hour",
+      "gridPos": {
+        "x": 14,
+        "y": 4,
+        "w": 10,
+        "h": 12
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT z.zone AS zone, z.lat AS latitude, z.lon AS longitude, count() AS pickups\nFROM taxi.trips AS t\nINNER JOIN taxi.zones AS z ON z.location_id = t.pu_location_id\nWHERE t.pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 1 HOUR\n  AND z.lat IS NOT NULL\nGROUP BY z.zone, z.lat, z.lon"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#c4bdf5"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "view": {
+          "id": "coords",
+          "lat": 40.7,
+          "lon": -73.94,
+          "zoom": 10.5,
+          "allLayers": true
+        },
+        "controls": {
+          "showZoom": false,
+          "mouseWheelZoom": false,
+          "showAttribution": false,
+          "showScale": false,
+          "showMeasure": false,
+          "showDebug": false
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Pickups",
+            "tooltip": true,
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "config": {
+              "showLegend": false,
+              "style": {
+                "size": {
+                  "field": "pickups",
+                  "min": 3,
+                  "max": 20,
+                  "fixed": 5
+                },
+                "color": {
+                  "fixed": "#c4bdf5"
+                },
+                "opacity": 0.7,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              }
+            }
+          }
+        ],
+        "tooltip": {
+          "mode": "details"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "bargauge",
+      "title": "Top 10 pickup zones · last sim hour",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 7,
+        "h": 11
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT pu_zone AS zone, count() AS trips\nFROM taxi.trips\nWHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 1 HOUR\nGROUP BY pu_zone\nORDER BY trips DESC\nLIMIT 10"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#9a9890"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#9a9890",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": "/^trips$/"
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "namePlacement": "left",
+        "showUnfilled": false,
+        "sizing": "auto",
+        "minVizHeight": 10,
+        "maxVizHeight": 40,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 17
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "barchart",
+      "title": "Card tip % by borough · last 24 sim hours",
+      "gridPos": {
+        "x": 7,
+        "y": 16,
+        "w": 5,
+        "h": 11
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- Tips are only recorded for card payments, so only card trips count.\nSELECT pu_borough AS borough, round(avg(tip_pct), 1) AS avg_tip_pct, count() AS card_trips\nFROM taxi.trips\nWHERE is_card AND tip_pct IS NOT NULL\n  AND pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 24 HOUR\n  AND pu_borough NOT IN ('Unknown', 'N/A')\nGROUP BY borough\nHAVING card_trips >= 30\nORDER BY avg_tip_pct DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "custom": {
+            "fillOpacity": 90,
+            "lineWidth": 0,
+            "axisBorderShow": false,
+            "axisPlacement": "auto",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "borough"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Manhattan": {
+                        "color": "#3987e5",
+                        "index": 0
+                      },
+                      "Brooklyn": {
+                        "color": "#d95926",
+                        "index": 1
+                      },
+                      "Queens": {
+                        "color": "#199e70",
+                        "index": 2
+                      },
+                      "Bronx": {
+                        "color": "#c98500",
+                        "index": 3
+                      },
+                      "Staten Island": {
+                        "color": "#d55181",
+                        "index": 4
+                      },
+                      "EWR": {
+                        "color": "#008300",
+                        "index": 5
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "card_trips"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "borough",
+        "colorByField": "borough",
+        "orientation": "vertical",
+        "showValue": "always",
+        "stacking": "none",
+        "barWidth": 0.7,
+        "barRadius": 0.05,
+        "groupWidth": 0.7,
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "xTickLabelRotation": 0
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Rejected by the pipeline · last 24 sim hours",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 7,
+        "h": 3
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT round(100 * rejected / (rejected + valid), 2) AS rejected_pct\nFROM\n(\n    SELECT (SELECT count() FROM taxi.trips_rejected\n            WHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 24 HOUR) AS rejected,\n           (SELECT count() FROM taxi.trips\n            WHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 24 HOUR) AS valid\n)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#9a9890"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 32,
+          "titleSize": 18
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "bargauge",
+      "title": "",
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 7,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- A trip can fail several rules, so it counts once per reason.\nSELECT reason, count() AS trips\nFROM taxi.trips_rejected\nARRAY JOIN reasons AS reason\nWHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 24 HOUR\nGROUP BY reason\nORDER BY trips DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#9a9890"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#9a9890",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": "/^trips$/"
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "namePlacement": "left",
+        "showUnfilled": false,
+        "sizing": "auto",
+        "minVizHeight": 10,
+        "maxVizHeight": 40,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 17
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "barchart",
+      "title": "Pipeline latency per stage · last 15 wall minutes",
+      "gridPos": {
+        "x": 19,
+        "y": 16,
+        "w": 5,
+        "h": 11
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- Wall-clock time (at) only: the time between each checkpoint and the previous one of the same trace.\nSELECT stage,\n       round(quantile(0.5)(ms))  AS p50_ms,\n       round(quantile(0.95)(ms)) AS p95_ms\nFROM\n(\n    SELECT stage, seq,\n           dateDiff('millisecond',\n                    lagInFrame(at) OVER (PARTITION BY trace_id ORDER BY seq ROWS BETWEEN 1 PRECEDING AND CURRENT ROW),\n                    at) AS ms,\n           row_number() OVER (PARTITION BY trace_id ORDER BY seq) AS rn\n    FROM taxi.trace_events\n    WHERE at >= now64(3) - INTERVAL 15 MINUTE\n)\nWHERE rn > 1\nGROUP BY stage\nORDER BY any(seq)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 90,
+            "lineWidth": 0,
+            "axisBorderShow": false,
+            "axisPlacement": "auto",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50_ms"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#7f74e0"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "p50"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95_ms"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c4bdf5"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "p95"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "stage",
+        "orientation": "vertical",
+        "showValue": "auto",
+        "stacking": "none",
+        "barWidth": 0.8,
+        "barRadius": 0.05,
+        "groupWidth": 0.75,
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0
+      }
+    }
+  ]
+}

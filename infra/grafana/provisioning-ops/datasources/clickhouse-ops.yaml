@@ -1,0 +1,18 @@
+# Operator-only: this file is mounted into grafana-ops only, never into the public Grafana (ADR-017).
+apiVersion: 1
+datasources:
+  - name: ClickHouse (ops)
+    uid: clickhouse-ops
+    type: grafana-clickhouse-datasource
+    isDefault: true
+    editable: false
+    jsonData:
+      host: clickhouse
+      port: 8123
+      protocol: http
+      username: grafana_ops
+      defaultDatabase: taxi
+      # seconds; must stay under the grafana profile's max_execution_time constraint (30)
+      queryTimeout: "15"
+    secureJsonData:
+      password: ${CLICKHOUSE_OPS_PASSWORD}

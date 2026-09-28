@@ -80,7 +80,7 @@ make down                            # volumes keep everything
 | Kiosk safety | `caffeinate` running. Do Not Disturb on (manual reminder) |
 
 ## 4. During the day
-- Every hour, glance at **Stand Health**: freshness is green, agent success is ≥ 90%, and memory is flat.
+- Every hour, glance at **Stand Health** (`http://localhost:3002/d/stand-health?kiosk`, user `admin`, password `GRAFANA_ADMIN_PASSWORD` from `.env`): freshness is green, agent success is ≥ 90%, and memory is flat. It runs in its own Grafana on the laptop only, so visitors can never open it (ADR-017).
 - If the replayer reaches the end of the month, it loops by itself: the sim clock jumps about 4 days forward, to the same weekday 5 weeks later. The dashboard shows a date jump, and that's expected. You don't need to do anything.
 - Avoid pausing the replayer during visits. The dashboard freezes.
 - A crowd arrives after a lecture: point them to the QR card. The rate limits protect the laptop. When the queue is long, the agent says "You're next in line…", which is expected.

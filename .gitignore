@@ -12,3 +12,4 @@ __pycache__/
 .mypy_cache/
 node_modules/
 .DS_Store
+.playwright-mcp/

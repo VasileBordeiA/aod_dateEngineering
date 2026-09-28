@@ -62,6 +62,7 @@ services:
       CLICKHOUSE_INGEST_PASSWORD: ${CLICKHOUSE_INGEST_PASSWORD:?run make secrets}
       CLICKHOUSE_AGENT_PASSWORD: ${CLICKHOUSE_AGENT_PASSWORD:?run make secrets}
       CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:?run make secrets}
+      CLICKHOUSE_OPS_PASSWORD: ${CLICKHOUSE_OPS_PASSWORD:?run make secrets}
     ports: ["127.0.0.1:8123:8123", "127.0.0.1:9000:9000"]
     volumes:
       - clickhouse-data:/var/lib/clickhouse
@@ -93,11 +94,43 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/nyc-taxi-live.json
+      # No internet at the venue: new geomap panels start on the zone outlines, never on a tile server
+      GF_GEOMAP_DEFAULT_BASELAYER_CONFIG: >-
+        {"type":"geojson","name":"Taxi zones","config":{"src":"public/maps/taxi_zones.geojson","rules":[],
+        "style":{"color":{"fixed":"#3a3f4a"},"opacity":0.6,"lineWidth":1}}}
+      GF_GEOMAP_ENABLE_CUSTOM_BASELAYERS: "false"
       CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD}
     ports: ["127.0.0.1:3001:3000"]
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./data/taxi_zones.geojson:/usr/share/grafana/public/maps/taxi_zones.geojson:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 384m
+    restart: unless-stopped
+    logging: *logging
+
+  # Operator-only Stand Health (ADR-017). Grafana OSS lets any viewer query any datasource of its org, so the
+  # grafana_ops datasource (agent_log, system.query_log) lives in its own Grafana: localhost only, login required,
+  # not behind Caddy.
+  grafana-ops:
+    build: infra/grafana
+    depends_on: { clickhouse: { condition: service_healthy } }
+    environment:
+      GF_SERVER_ROOT_URL: http://localhost:3002/
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?run make secrets}
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/stand-health.json
+      CLICKHOUSE_OPS_PASSWORD: ${CLICKHOUSE_OPS_PASSWORD}
+    ports: ["127.0.0.1:3002:3000"]
+    volumes: ["./infra/grafana/provisioning-ops:/etc/grafana/provisioning:ro"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health | grep -q ok"]
       interval: 10s

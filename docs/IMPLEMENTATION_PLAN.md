@@ -77,7 +77,7 @@ gantt
 
 ### M2: Aggregates + dashboard (D4–D6)
 - [x] **A** 1-minute tumbling window per `pu_borough` → `agg.borough_minute` → sink (spec 03).
-- [ ] **C** Grafana provisioning: datasource plus the "NYC Taxi Live" and "Stand Health" dashboards (spec 05).
+- [x] **C** Grafana provisioning: datasource plus the "NYC Taxi Live" and "Stand Health" dashboards (spec 05). Stand Health runs in its own operator-only Grafana (ADR-017).
 - [x] **A** First backfill run (up to day 8), to check that the backfill works and to measure how long it takes.
 
 **Exit:** the dashboard updates every 5 s with no errors. The geomap shows zones. The rejected-reasons panel is populated.

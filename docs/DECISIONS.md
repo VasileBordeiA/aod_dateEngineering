@@ -180,3 +180,40 @@ Format: context → decision → consequences → alternatives rejected. To chan
 **Decision:** Every delete-policy topic uses `retention.ms=-1` with `retention.bytes=1 GiB` per partition (`TOPIC_RETENTION_BYTES`). `create-topics.sh` converges existing topics to this config.
 
 **Consequences:** Retention no longer depends on timestamps. Worst case this is about 9 GiB of broker disk (9 partitions). ClickHouse remains the system of record.
+
+## ADR-016: Sim-time charts use the Trend panel with a `sumIf` pivot
+**Status:** accepted · 2026-09-28 · resolves the M2 spike in spec 05
+
+**Context:** Grafana's Time series panel draws over the dashboard's wall-clock range, so October 2025 sim data never shows. The spike compared the Trend panel with a stacked Bar chart on the live `agg_borough_minute` data.
+
+**Decision:**
+- Every sim-time series is a **Trend** panel.
+- The x field is `toUnixTimestamp64Milli(window_start)` with unit `time:HH:mm`.
+- Boroughs are pivoted into columns in SQL (`sumIf(trips, borough = '…')`), so there is one frame and no transformations.
+- `min: 0` goes on the series fields only. Set on the x field, it stretches the axis back to 1970.
+- The **Stat sparkline** has the same wall-clock binding and stays empty for sim data, so the big screen has no sparklines.
+
+**Consequences:** A real time axis with readable `HH:mm` ticks, stacking, and a multi-series tooltip. The Bar chart fallback also worked, but it shows every minute as a category label and gets crowded at 360 points.
+
+## ADR-017: Stand Health runs in a separate operator-only Grafana
+**Status:** accepted · 2026-09-28 · supersedes the "folder with no anonymous permission" plan in spec 05
+
+**Context:** During M2 an anonymous `POST /grafana/api/ds/query` through Caddy returned rows, and `/api/frontend/settings` listed every datasource. Grafana OSS has no per-datasource permissions (an Enterprise feature). Any viewer can query any datasource of the org by uid, whatever folder the dashboards sit in. An ops datasource that can read `taxi.agent_log` would expose other visitors' questions (CLAUDE.md invariant 8).
+
+**Decision:**
+- A second container, `grafana-ops`, from the same image:
+  - published on `127.0.0.1:3002` only, not behind Caddy;
+  - anonymous access off, admin login required;
+  - provisioned from `infra/grafana/provisioning-ops/`.
+- It alone holds the `clickhouse-ops` datasource (ClickHouse user `grafana_ops`, SELECT on `agent_log`, `system.parts`, `system.query_log` plus the dashboard tables) and the Stand Health dashboard.
+- The public `grafana_ro` loses `system.parts`, which it no longer needs.
+- `make secrets` now appends keys that are new in `.env.example` (such as `CLICKHOUSE_OPS_PASSWORD`) to an existing `.env`.
+
+**Consequences:**
+- The public Grafana can't reach operator data even with a crafted request. Stack tests pin this.
+- About 150 MB more RAM (`mem_limit` 384 m).
+- The operator logs in once per Grafana session on the laptop.
+
+**Rejected:**
+- A second Grafana organisation. It's the same isolation, but the org has to exist before provisioning, which needs an extra API bootstrap step.
+- A hidden folder, which isn't isolation at all.

@@ -1,0 +1,1000 @@
+{
+  "uid": "stand-health",
+  "title": "Stand Health",
+  "description": "Operator-only (grafana-ops, 127.0.0.1:3002). Reads agent_log and system.query_log (spec 05, ADR-017).",
+  "tags": [
+    "stand",
+    "ops"
+  ],
+  "timezone": "utc",
+  "refresh": "5s",
+  "liveNow": false,
+  "editable": false,
+  "graphTooltip": 0,
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "hidden": true,
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s"
+    ]
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Freshness",
+      "description": "now64() − max(stored_at). Green < 3 s, red > 10 s.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- Wall time since the newest row was stored. Only recent sim rows are read (pickup_ts is the sort key).\nSELECT dateDiff('millisecond', max(stored_at), now64(3)) AS freshness_ms\nFROM taxi.trips\nWHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 1 HOUR"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#0ca30c",
+                "value": null
+              },
+              {
+                "color": "#fab219",
+                "value": 3000
+              },
+              {
+                "color": "#d03b3b",
+                "value": 10000
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Ingest rate (rows/s, last 60 s)",
+      "description": "Red when nothing was stored in the last minute.",
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT round(count() / 60, 1) AS rows_per_s\nFROM taxi.trips\nWHERE stored_at >= now64(3) - INTERVAL 60 SECOND"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#d03b3b",
+                "value": null
+              },
+              {
+                "color": "#0ca30c",
+                "value": 0.1
+              }
+            ]
+          },
+          "noValue": "–",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "E2E latency p95 (last 5 min)",
+      "description": "Red above 5 s.",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- produced_at (replayer) → stored_at (ClickHouse), both wall clock.\nSELECT quantile(0.95)(dateDiff('millisecond', produced_at, stored_at)) AS p95_ms\nFROM taxi.trips\nWHERE stored_at >= now64(3) - INTERVAL 5 MINUTE"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#0ca30c",
+                "value": null
+              },
+              {
+                "color": "#d03b3b",
+                "value": 5000
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Sim speed (last 60 s)",
+      "description": "Expect ≈ REPLAY_SPEED (60). Much higher = backfill; empty = paused or stalled.",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- Sim seconds covered ÷ wall seconds elapsed, over replay rows stored in the last minute. Expect ≈ REPLAY_SPEED.\nSELECT round(dateDiff('millisecond', min(pickup_ts), max(pickup_ts))\n             / nullIf(dateDiff('millisecond', min(stored_at), max(stored_at)), 0)) AS sim_speed\nFROM taxi.trips\nWHERE source = 'replay' AND stored_at >= now64(3) - INTERVAL 60 SECOND"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:×",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Rejected share (last 24 sim hours)",
+      "description": "Info only: rejection is healthy behaviour.",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT round(100 * rejected / (rejected + valid), 2) AS rejected_pct\nFROM\n(\n    SELECT (SELECT count() FROM taxi.trips_rejected\n            WHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 24 HOUR) AS rejected,\n           (SELECT count() FROM taxi.trips\n            WHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 24 HOUR) AS valid\n)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "–",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Sim clock",
+      "description": "",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT formatDateTime(now_ts, '%a %d %b %H:%i') AS sim_clock FROM taxi.sim_now"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^sim_clock$/"
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Active parts per table (red > 300)",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT table, count() AS parts\nFROM system.parts\nWHERE database = 'taxi' AND active\nGROUP BY table\nORDER BY parts DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#0ca30c",
+                "value": null
+              },
+              {
+                "color": "#fab219",
+                "value": 150
+              },
+              {
+                "color": "#d03b3b",
+                "value": 300
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": "/^parts$/"
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "auto",
+        "minVizHeight": 10,
+        "maxVizHeight": 32,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 16
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Agent questions (last 10 min)",
+      "description": "",
+      "gridPos": {
+        "x": 8,
+        "y": 5,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT count() AS questions\nFROM taxi.agent_log\nWHERE asked_at >= now64(3) - INTERVAL 10 MINUTE"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Agent success (last 60 min)",
+      "description": "Amber below 90 %. Refusals excluded.",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- Refusals (off-topic, injection) are correct behaviour, so they are left out of the success rate.\nSELECT round(100 * avgIf(success, NOT refused), 1) AS success_pct\nFROM taxi.agent_log\nWHERE asked_at >= now64(3) - INTERVAL 60 MINUTE"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#fab219",
+                "value": null
+              },
+              {
+                "color": "#0ca30c",
+                "value": 90
+              }
+            ]
+          },
+          "noValue": "–",
+          "decimals": 1,
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "no questions",
+                  "color": "text"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Agent latency p95 (last 60 min)",
+      "description": "M3 target: p95 < 15 s on the local model.",
+      "gridPos": {
+        "x": 16,
+        "y": 5,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT quantile(0.95)(latency_ms) AS p95_ms\nFROM taxi.agent_log\nWHERE asked_at >= now64(3) - INTERVAL 60 MINUTE"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#0ca30c",
+                "value": null
+              },
+              {
+                "color": "#fab219",
+                "value": 15000
+              }
+            ]
+          },
+          "noValue": "–",
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "no questions",
+                  "color": "text"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "Agent provider split (last 60 min)",
+      "gridPos": {
+        "x": 20,
+        "y": 5,
+        "w": 4,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT provider, count() AS questions\nFROM taxi.agent_log\nWHERE asked_at >= now64(3) - INTERVAL 60 MINUTE\nGROUP BY provider\nORDER BY questions DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#9a9890",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": "/^questions$/"
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "auto",
+        "minVizHeight": 10,
+        "maxVizHeight": 32,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 16
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Agent refusals (last 60 min)",
+      "description": "",
+      "gridPos": {
+        "x": 8,
+        "y": 9,
+        "w": 12,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT countIf(refused) AS refusals\nFROM taxi.agent_log\nWHERE asked_at >= now64(3) - INTERVAL 60 MINUTE"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Agent errors (last 20)",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 12
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT asked_at, provider, model, mode, error\nFROM taxi.agent_log\nWHERE NOT success AND NOT refused\nORDER BY asked_at DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "table",
+      "title": "ClickHouse slow queries (> 2 s, last 15 min)",
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 12
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT event_time, user, query_duration_ms, read_rows, substring(query, 1, 200) AS query\nFROM system.query_log\nWHERE event_time >= now() - INTERVAL 15 MINUTE\n  AND type IN ('QueryFinish', 'ExceptionWhileProcessing')\n  AND query_duration_ms > 2000\nORDER BY event_time DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    }
+  ]
+}

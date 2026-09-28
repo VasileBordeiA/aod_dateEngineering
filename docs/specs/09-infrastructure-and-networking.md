@@ -78,6 +78,7 @@ All keys are in `.env` (template: [.env.example](../../.env.example)). `make sec
 | `redpanda-console` | `redpandadata/console:<pin>` | redpanda (healthy) | HTTP `/admin/health` | 256 m | n/a |
 | `clickhouse` | `clickhouse/clickhouse-server:<pin LTS>` | redpanda-init (completed) | `wget -qO- localhost:8123/ping` | 4 g | `clickhouse-data`, `./infra/clickhouse/{init,config.d,users.d}` ro, `./data/zones.csv` ro |
 | `grafana` | built from `infra/grafana/Dockerfile` (plugin baked in) | clickhouse (healthy) | `wget -qO- localhost:3000/api/health` | 384 m | `./infra/grafana/provisioning` ro, `./data/taxi_zones.geojson` ro |
+| `grafana-ops` | same image; `127.0.0.1:3002`, no anonymous access, not behind Caddy (ADR-017) | clickhouse (healthy) | `wget -qO- localhost:3000/api/health` | 384 m | `./infra/grafana/provisioning-ops` ro |
 | `processor` | built from `services/processor` | redpanda-init (completed), clickhouse (healthy) | heartbeat file `/tmp/healthy` touched < 30 s ago | 768 m | `processor-state:/state`, `./data/zones.csv` ro |
 | `replayer` | built from `services/replayer` | redpanda-init (completed), processor (healthy) | heartbeat file + `GET :8001/status` | 512 m | `./data/replay` ro, `replayer-state:/data/state` |
 | `api` | built from `services/api` | redpanda-init, clickhouse (healthy) | `GET /api/healthz` (checks ClickHouse + broker, **not** the LLM) | 512 m | `./evals` ro |
@@ -160,7 +161,7 @@ Live mode continues from the saved state (spec 01).
 
 ## Observability
 - `make status` prints `docker compose ps`, memory per container (`docker stats --no-stream`), processor lag (`rpk group describe`), freshness, and the LLM status.
-- Stand Health dashboard (spec 05).
+- Stand Health dashboard (spec 05) at `http://localhost:3002/d/stand-health?kiosk`, on the laptop only, with the Grafana admin login.
 
 ## Acceptance criteria
 1. On a clean clone: `cp .env.example .env && make secrets && make data && make up` results in every service `healthy` within 3 min, with no manual steps.

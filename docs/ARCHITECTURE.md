@@ -48,7 +48,7 @@ flowchart TB
 | Broker | Redpanda (single node) + Redpanda Console | Durable log, decouples every stage, visible topics for the demo | [02](specs/02-topics-and-event-contracts.md) |
 | Stream processor | Quix Streams | Validate → enrich → window → sink. Emit trace checkpoints | [03](specs/03-stream-processor.md) |
 | Storage | ClickHouse (single node) | Enriched trips, rejects, aggregates, traces, agent log | [04](specs/04-clickhouse-schema.md) |
-| Dashboard | Grafana + ClickHouse datasource | Live city view and stand-health view | [05](specs/05-grafana-dashboards.md) |
+| Dashboard | Grafana + ClickHouse datasource | Live city view (public) and stand-health view (separate operator-only Grafana) | [05](specs/05-grafana-dashboards.md) |
 | AI agent | FastAPI + openai SDK → Ollama / internal gateway | Text-to-SQL with tools, guardrails, SSE | [06](specs/06-ai-data-agent.md) |
 | Trace your ride | FastAPI (rides + WS relay) + processor checkpoints | Student ride creation and live stage tracking | [07](specs/07-trace-your-ride.md) |
 | Web UI | Next.js + TypeScript | /agent, /ride, /trace, /architecture, /qr | [08](specs/08-web-frontend.md) |
@@ -92,6 +92,7 @@ At 60×, one October month (≈3.5 M trips) lasts about 12 wall hours at ~80 msg
 | web (Next.js) | 3000 | `127.0.0.1:3000` | via Caddy `/` |
 | api (FastAPI) | 8000 | `127.0.0.1:8000` | via Caddy `/api/*` |
 | grafana | 3000 | `127.0.0.1:3001` | via Caddy `/grafana/*` |
+| grafana-ops (Stand Health) | 3000 | `127.0.0.1:3002` | **no**: operator laptop only, login required (ADR-017) |
 | redpanda (Kafka) | 9092 internal / 19092 external | `127.0.0.1:19092` | no |
 | redpanda admin | 9644 | `127.0.0.1:9644` | no |
 | redpanda-console | 8080 | `127.0.0.1:8080` | no (shown on the laptop screen) |
@@ -107,10 +108,10 @@ At 60×, one October month (≈3.5 M trips) lasts about 12 wall hours at ~80 msg
 | Docker Desktop VM | 14 GB total | Docker Desktop → Resources |
 | … redpanda | 1.5 GB | `--memory 1G --smp 1 --reserve-memory 0M --overprovisioned` |
 | … clickhouse | 4 GB | `max_server_memory_usage_to_ram_ratio`, and per-profile `max_memory_usage` |
-| … grafana, console, caddy | ~0.8 GB | compose `mem_limit` |
+| … grafana ×2, console, caddy | ~1.0 GB | compose `mem_limit` |
 | … api, processor, replayer | ~1.5 GB | compose `mem_limit` |
 | … web | 0.5 GB | compose `mem_limit` |
-| Headroom | ~2 GB | n/a |
+| Headroom | ~1.8 GB | n/a |
 
 Disk: roughly 1 GB for raw and prepared data, and under 3 GB of ClickHouse data after a full event day including backfill. Kafka retention is size-based, 1 GiB per partition (ADR-015).
 
@@ -119,7 +120,8 @@ Disk: roughly 1 GB for raw and prepared data, and under 3 GB of ClickHouse data 
 - **ClickHouse users** (spec 04):
   - `ingest_writer`: INSERT only, used by the processor and the api `agent_log` writer.
   - `agent_ro`: SELECT on whitelisted tables, `readonly=1`, hard limits, quota.
-  - `grafana_ro`: SELECT on taxi.*.
+  - `grafana_ro`: SELECT on the dashboard tables only (no `agent_log`, no `system.*`), because anonymous viewers can send arbitrary SQL through Grafana.
+  - `grafana_ops`: adds `agent_log`, `system.parts` and `system.query_log`. It's used only by `grafana-ops`, which isn't on the LAN (ADR-017).
   - `default`: disabled for network access.
 - **Agent:** input length and rate limits, the SQL guard (single SELECT, whitelist, no SETTINGS, forced LIMIT), and a tool-iteration cap (spec 06).
 - **Rides:** server-side validation and a rate limit. There are no free-text fields, so there's nothing to moderate.
