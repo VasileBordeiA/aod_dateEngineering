@@ -76,6 +76,26 @@ ATTACKS = [
     # error instead.
     "WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT 1) SELECT * FROM a",
     "WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x FROM trips) SELECT * FROM a",
+    # fix round 4: a WITH name may not reuse a whitelisted table name (any case, table or scalar
+    # CTE). Backward-only visibility alone missed this: the guard read the forward-referenced
+    # `trips`/`zones` as the real table, but ClickHouse resolved it to the later sibling CTE,
+    # closing a cycle back to the REAL agent_log (verified as agent_ro: ACCESS_DENIED on
+    # taxi.agent_log for the first query).
+    "WITH agent_log AS (SELECT * FROM trips), trips AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
+    "WITH agent_log AS (SELECT * FROM zones), zones AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
+    "WITH agent_log AS (SELECT * FROM zones), b AS (SELECT 1 AS x), zones AS (SELECT * FROM agent_log) "
+    "SELECT * FROM agent_log",
+    "WITH trips AS (SELECT 1) SELECT * FROM trips",
+    "WITH 1 AS zones SELECT * FROM zones",
+    "WITH Trips AS (SELECT 1) SELECT * FROM trips",
+    "WITH `ZONES` AS (SELECT 1) SELECT * FROM taxi.zones",
+    "WITH a AS (WITH trips AS (SELECT * FROM agent_log) SELECT * FROM trips) SELECT * FROM a",
+    "SELECT * FROM trips UNION ALL (WITH zones AS (SELECT 1) SELECT * FROM zones)",
+    # fix round 4: ClickHouse matches CTE names case-sensitively (verified as agent_ro:
+    # `WITH AGENT_LOG AS (SELECT 1 AS x) SELECT * FROM agent_log` -> ACCESS_DENIED on
+    # taxi.agent_log), so the guard must too — a differently-cased CTE is not a shadow.
+    "WITH AGENT_LOG AS (SELECT 1 AS x) SELECT * FROM agent_log",
+    "WITH Agent_Log AS (SELECT 1 AS x) SELECT * FROM `agent_log`",
 ]
 
 MUST_PASS = [
@@ -102,6 +122,9 @@ MUST_PASS = [
     # (both branches succeed; a lone `SELECT * FROM nope` errors UNKNOWN_TABLE, so both branches
     # really did resolve through the CTE, not a same-named real table).
     "WITH b AS (SELECT 1 AS x) SELECT * FROM b UNION ALL SELECT * FROM b",
+    # fix round 4: backticks don't change a name, and an inner query may still use an outer CTE.
+    "WITH `b` AS (SELECT 1 AS x FROM trips) SELECT * FROM b",
+    "WITH a AS (SELECT 1 AS x FROM trips) SELECT * FROM (WITH b AS (SELECT * FROM a) SELECT * FROM b)",
 ]
 
 
@@ -140,6 +163,13 @@ def test_reasons_are_friendly():
     assert "one statement" in check_sql("SELECT 1; SELECT 2").reason
     assert check_sql("SELEC count( FROM").reason == PARSE_ERROR
     assert "SETTINGS" in check_sql("SELECT 1 FROM trips SETTINGS max_threads = 1").reason
+
+
+def test_whitelisted_cte_name_reason_names_it():
+    reason = check_sql("WITH trips AS (SELECT 1) SELECT * FROM trips").reason
+    assert "'trips'" in reason and "another name" in reason
+    assert "'zones'" in check_sql("WITH 1 AS zones SELECT * FROM zones").reason
+    assert "'Trips'" in check_sql("WITH Trips AS (SELECT 1) SELECT * FROM x").reason
 
 
 def test_length_limit():

@@ -2,6 +2,14 @@
 
 Defence in depth: the agent_ro user is the real wall. This gives fast, friendly errors the model can repair,
 and stops obvious abuse. Never add a flag that skips it (CLAUDE.md invariant 4).
+
+WITH names (CTEs) follow two plain rules, and together they stop a CTE from smuggling in a table:
+  1. A WITH name may not reuse a whitelisted table name (trips, zones, ...), in any letter case.
+  2. A WITH name is visible only to its own query body and to *later* CTEs of the same WITH
+     (backward-only), and must match exactly, letter case included, as ClickHouse does.
+Why both: a name used inside a CTE is then either a whitelisted name (never a CTE, so it really is
+that table) or another name, which must be a CTE declared earlier. No cycle through a later CTE can
+end up reading a real table the whitelist doesn't allow.
 """
 
 from __future__ import annotations
@@ -40,7 +48,11 @@ def _function_name(node: exp.Func) -> str:
 
 
 def _visible_cte_names(table: exp.Table) -> set[str]:
-    """CTE names an enclosing WITH makes visible to `table`, honouring scope: backward-only.
+    """CTE names an enclosing WITH makes visible to `table`, honouring scope: backward-only (rule 2).
+
+    Names are returned exactly as written, not lowercased: ClickHouse matches CTE names
+    case-sensitively (verified: `WITH AGENT_LOG AS (SELECT 1 AS x) SELECT * FROM agent_log` reads
+    the real agent_log table), so a differently-cased CTE must not count as a shadow here either.
 
     Inside the body of CTE i of a WITH, only CTEs 0..i-1 of that same WITH are visible — never
     CTE i itself (a non-recursive self-reference resolves to the real table), and never a later
@@ -48,15 +60,15 @@ def _visible_cte_names(table: exp.Table) -> set[str]:
     WITH's own CTEs) sees all of that WITH's non-scalar CTEs. Outer WITHs apply the same rule at
     their own level, so we walk `table`'s full ancestor chain, applying this per level.
 
-    This is deliberately stricter than ClickHouse's own forward-reference resolution (verified
-    empirically: ClickHouse resolves `WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x FROM trips)
-    SELECT * FROM a` by looking b up even though it's declared after a — and, more importantly,
-    resolves an indirect cycle like `WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM
-    agent_log) SELECT * FROM agent_log` back to the REAL agent_log table, not a CTE, because a
-    non-recursive CTE can only see names declared strictly before it). Backward-only visibility
-    makes such indirect self-reference cycles impossible by construction: any table mentioned
-    inside CTE 0's body can never resolve to a CTE (0..i-1 is empty for i=0), so it must be a real,
-    whitelisted table.
+    This is deliberately stricter than ClickHouse, which does look up later siblings (verified:
+    `WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x FROM trips) SELECT * FROM a` works there),
+    and whose cycles through siblings can end at a REAL table (`WITH agent_log AS (SELECT * FROM
+    b), b AS (SELECT * FROM agent_log) SELECT * FROM agent_log` reads the real agent_log). With
+    backward-only visibility a forward or self reference is "not a CTE" to the guard, so it must
+    be a whitelisted name — and rule 1 (checked in check_sql) forbids a CTE from having a
+    whitelisted name, so ClickHouse can't resolve it to a later CTE either. Without rule 1,
+    `WITH agent_log AS (SELECT * FROM trips), trips AS (SELECT * FROM agent_log) SELECT * FROM
+    agent_log` would pass the guard and read the real agent_log.
 
     A *scalar* CTE (`WITH <expr> AS name`, `cte.args["scalar"]`) is a ClickHouse expression
     alias, not a relation: `WITH 1 AS x SELECT * FROM x` errors "unknown table x" when no real
@@ -84,7 +96,7 @@ def _visible_cte_names(table: exp.Table) -> set[str]:
         for cte in visible:
             if cte.args.get("scalar"):
                 continue  # an expression alias, not a table — never a valid FROM target
-            names.add(cte.alias_or_name.lower())
+            names.add(cte.alias_or_name)
     return names
 
 
@@ -114,15 +126,19 @@ def check_sql(sql: str) -> GuardResult:
                 return _reject(f"{clause.upper()} clauses are not allowed.")
     if root.find(exp.Into) is not None:
         return _reject("INTO is not allowed.")
+    # WITH rule 1 (see the module docstring): a WITH name may not reuse a whitelisted table name.
+    for cte in root.find_all(exp.CTE):
+        if cte.alias_or_name.lower() in ALLOWED_TABLES:
+            return _reject(f"A WITH name can't reuse the table name '{cte.alias_or_name}'. Pick another name.")
     # Rules 4 + 5: every table is a plain whitelisted name (optionally taxi.), or a CTE name
-    # visible at that point (scope-aware: a CTE's own self-reference is the real table, not itself).
+    # visible at that point (WITH rule 2: declared earlier, exact letter case).
     for table in root.find_all(exp.Table):
         if not isinstance(table.this, exp.Identifier):
             return _reject(f"Table functions like {table.this.sql('clickhouse')[:40]} are not allowed.")
         name, db = table.name.lower(), table.db.lower()
         if table.catalog or db not in ("", "taxi"):
             return _reject(f"Table {table.sql('clickhouse')} is not available. Use: {TABLE_LIST}.")
-        if not db and name in _visible_cte_names(table):
+        if not db and table.name in _visible_cte_names(table):
             continue
         if name not in ALLOWED_TABLES:
             return _reject(f"Table {table.sql('clickhouse')} is not available. Use: {TABLE_LIST}.")
