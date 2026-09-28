@@ -42,10 +42,19 @@ def _function_name(node: exp.Func) -> str:
 def _visible_cte_names(table: exp.Table) -> set[str]:
     """CTE names an enclosing WITH makes visible to `table`, honouring scope.
 
-    Walk `table`'s ancestors. Each ancestor Select/SetOperation that carries a "with" arg
-    contributes its CTE names, EXCEPT a CTE that is itself an ancestor of `table` (i.e. `table`
-    sits inside that very CTE's own defining subquery). A non-recursive CTE's self-reference
-    resolves to the real table of that name, not to the CTE — so it must not be exempted here.
+    Walk `table`'s ancestors. Each ancestor Select/SetOperation that carries a "with_" arg
+    contributes its (non-scalar) CTE names — siblings are mutually visible regardless of
+    declaration order, since ClickHouse resolves forward references within one WITH clause
+    (verified empirically: `WITH a AS (SELECT * FROM nope), nope AS (SELECT 1 AS x) SELECT * FROM
+    a` returns 1, not "unknown table nope") — EXCEPT a CTE that is itself an ancestor of `table`
+    (i.e. `table` sits inside that very CTE's own defining subquery). A non-recursive CTE's
+    self-reference resolves to the real table of that name, not to the CTE — so it must not be
+    exempted here.
+
+    A *scalar* CTE (`WITH <expr> AS name`, `cte.args["scalar"]`) is a ClickHouse expression
+    alias, not a relation: `WITH 1 AS x SELECT * FROM x` errors "unknown table x" when no real
+    table x exists, and resolves to the real table when one does (verified empirically). Its name
+    must never be treated as a visible table.
     """
     ancestors: list[object] = []
     node = table.parent
@@ -61,6 +70,8 @@ def _visible_cte_names(table: exp.Table) -> set[str]:
         if with_ is None:
             continue
         for cte in with_.expressions:
+            if cte.args.get("scalar"):
+                continue  # an expression alias, not a table — never a valid FROM target
             if id(cte) in in_scope:
                 continue  # table is inside this CTE's own body: self-reference, not a mention
             names.add(cte.alias_or_name.lower())

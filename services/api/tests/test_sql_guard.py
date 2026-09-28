@@ -52,6 +52,12 @@ ATTACKS = [
     "SELECT * FROM agent_log, (WITH agent_log AS (SELECT 1) SELECT * FROM agent_log) AS s",
     "SELECT * FROM agent_log UNION ALL (WITH agent_log AS (SELECT 1) SELECT * FROM agent_log)",
     "WITH agent_log AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
+    # fix round 2: a scalar WITH (`WITH <expr> AS name`) is a ClickHouse expression alias, never a
+    # relation. Verified on the running ClickHouse: `WITH 1 AS nope SELECT * FROM nope` and
+    # `WITH (SELECT 1) AS nope SELECT * FROM nope` both raise UNKNOWN_TABLE "nope" — so
+    # `FROM agent_log` here can only ever resolve to the real, forbidden table.
+    "WITH 1 AS agent_log SELECT * FROM agent_log",
+    "WITH (SELECT 1) AS agent_log SELECT * FROM agent_log",
 ]
 
 MUST_PASS = [
@@ -69,6 +75,26 @@ MUST_PASS = [
     "select count() from TAXI.TRIPS",
     "SELECT count() FROM taxi.trips;",
     "SELECT 1 UNION ALL SELECT 2",
+    # fix round 2: sibling CTEs in one WITH are mutually visible regardless of declaration order.
+    # Verified on the running ClickHouse with a name that is not a real table:
+    #   WITH a AS (SELECT * FROM nope), nope AS (SELECT 1 AS x) SELECT * FROM a  ->  returns 1
+    # (a bare `SELECT * FROM nope` on its own raises UNKNOWN_TABLE, so this is not a real table
+    # being reached; the forward reference to the sibling CTE resolves first). A plain backward
+    # reference must of course still pass too.
+    "WITH a AS (SELECT 1 AS x FROM trips), b AS (SELECT * FROM a) SELECT * FROM b",
+    "WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x FROM trips) SELECT * FROM a",
+    # Same mechanism with the forbidden name itself: verified directly against ClickHouse
+    # (`--database taxi`) that `WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT 1 AS x)
+    # SELECT * FROM a` returns column `x` with value 1 — i.e. it resolves to the sibling CTE, not
+    # to the real (0-row) taxi.agent_log table, even though a real table of that name exists. The
+    # query never reads agent_log; ClickHouse's own name resolution makes this safe.
+    "WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT 1) SELECT * FROM a",
+    # fix round 2: a WITH attached to a UNION is visible to every branch, not just the leftmost.
+    # Verified on the running ClickHouse with a non-existent name:
+    #   WITH nope AS (SELECT 1 AS a) SELECT * FROM nope UNION ALL SELECT * FROM nope  ->  1 \n 1
+    # (both branches succeed; a lone `SELECT * FROM nope` errors UNKNOWN_TABLE, so both branches
+    # really did resolve through the CTE, not a same-named real table).
+    "WITH b AS (SELECT 1 AS x) SELECT * FROM b UNION ALL SELECT * FROM b",
 ]
 
 
