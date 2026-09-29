@@ -47,6 +47,7 @@ test: ## Unit + contract tests (no Docker needed)
 	cd services/replayer && uv run pytest -q
 	cd services/processor && uv run pytest -q
 	cd services/api && uv run pytest -q
+	cd web && pnpm test
 
 test-integration: ## testcontainers integration tests (needs Docker running)
 	cd services/replayer && uv run pytest -q -m integration
@@ -60,6 +61,7 @@ lint: ## ruff + mypy
 	cd services/replayer && uv run ruff check src tests && uv run mypy src
 	cd services/processor && uv run ruff check src tests && uv run mypy src
 	cd services/api && uv run ruff check src tests && uv run mypy src
+	cd web && pnpm lint && pnpm typecheck
 
 smoke: ## M1 exit check: rows flowing, rejects with reasons, freshness
 	uv run python scripts/smoke_pipeline.py

@@ -145,6 +145,7 @@ services:
     depends_on:
       grafana: { condition: service_healthy }
       api: { condition: service_healthy }
+      web: { condition: service_healthy }
     ports: ["0.0.0.0:80:80"]
     volumes: ["./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"]
     mem_limit: 128m
@@ -224,6 +225,22 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *logging
+
+  web:
+    build:
+      context: web
+      args: { NEXT_PUBLIC_GRAFANA_PATH: "${NEXT_PUBLIC_GRAFANA_PATH}" }
+    depends_on: { api: { condition: service_healthy } }
+    ports: ["127.0.0.1:3000:3000"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     mem_limit: 512m
     restart: unless-stopped
     logging: *logging
