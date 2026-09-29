@@ -65,3 +65,74 @@ test("a cut stream keeps what arrived and offers a retry", async ({ page }) => {
   await expect(page.getByRole("table")).toContainText("Manhattan");
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
 });
+
+test("a typed question is cleared from the input box, and stays cleared after the idle reset (invariant 8)", async ({ page }) => {
+  await page.clock.install();
+  await mockApi(page, FIXTURE);
+  await page.goto("/agent");
+  const box = page.getByRole("textbox");
+  await box.fill("Where does my cousin Ana usually take a taxi?");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.getByTestId("answer")).toContainText("Manhattan riders tip best");
+  await expect(box).toHaveValue("");
+
+  await page.clock.fastForward(91_000);
+  await expect(page.getByTestId("attract")).toBeVisible();
+  await expect(page.getByText("cousin Ana")).toHaveCount(0);
+  await page.mouse.click(10, 10); // tap outside the question: wakes the kiosk to type
+  await expect(page.getByTestId("attract")).toHaveCount(0);
+  await expect(page.getByRole("textbox")).toHaveValue("");
+});
+
+test("events from a replaced stream never reach the new question", async ({ page }) => {
+  await mockApi(page, FIXTURE);
+  const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const B_BODY =
+    frame("sql", { attempt: 1, sql: "SELECT 'B-ONLY' AS b", purpose: "B" }) +
+    frame("answer", { text: "Answer for question B." }) +
+    frame("done", { request_id: "b", provider: "local", model: "m", mode: "tools", cached: false, latency_ms: 10, tool_calls: 1, invalid_tool_calls: 0, repairs: 0 });
+  // Question A streams from a stream the test controls and that ignores abort, so frames can still
+  // arrive after B has started: exactly what a parser's queued frames look like to the kiosk.
+  await page.addInitScript((bBody: string) => {
+    const w = window as unknown as { __pushA?: (s: string) => void; fetch: typeof fetch };
+    const realFetch = window.fetch.bind(window);
+    w.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/api/agent/ask")) {
+        const { question } = JSON.parse(String(init?.body)) as { question: string };
+        const headers = { "Content-Type": "text/event-stream" };
+        if (question.includes("best tippers")) {
+          const enc = new TextEncoder();
+          const stream = new ReadableStream<Uint8Array>({ start: (c) => { w.__pushA = (s) => c.enqueue(enc.encode(s)); } });
+          return new Response(stream, { headers });
+        }
+        return new Response(bBody, { headers });
+      }
+      return realFetch(input, init);
+    };
+  }, B_BODY);
+  await page.goto("/agent");
+  const sql = page.getByTestId("sql-panel");
+
+  await page.getByRole("button", { name: "Which borough has the best tippers?" }).click();
+  await page.waitForFunction(() => typeof (window as unknown as { __pushA?: unknown }).__pushA === "function");
+  await page.evaluate((f) => (window as unknown as { __pushA: (s: string) => void }).__pushA(f),
+    frame("sql", { attempt: 1, sql: "SELECT 'A-EARLY' AS a", purpose: "A" }));
+  await expect(sql).toContainText("A-EARLY");
+
+  await page.getByRole("button", { name: "What are the 10 busiest pickup zones in the last hour?" }).click();
+  await expect(page.getByTestId("answer")).toContainText("Answer for question B.");
+  await expect(sql).toContainText("B-ONLY");
+  await expect(sql).not.toContainText("A-EARLY");
+
+  // A keeps talking after B started: its frames must be ignored.
+  await page.evaluate((f) => (window as unknown as { __pushA: (s: string) => void }).__pushA(f),
+    frame("sql", { attempt: 2, sql: "SELECT 'A-LATE' AS a", purpose: "A" }) +
+    frame("answer", { text: "Answer for question A." }) +
+    frame("done", { request_id: "a", provider: "local", model: "m", mode: "tools", cached: false, latency_ms: 10, tool_calls: 1, invalid_tool_calls: 0, repairs: 0 }));
+  // Let the page drain its microtasks and paint twice before checking that nothing of A landed.
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await expect(sql).not.toContainText("A-LATE");
+  await expect(page.getByTestId("answer")).not.toContainText("question A");
+  await expect(page.getByTestId("answer")).toContainText("Answer for question B.");
+  await expect(sql).not.toContainText("attempt 2/3");
+});

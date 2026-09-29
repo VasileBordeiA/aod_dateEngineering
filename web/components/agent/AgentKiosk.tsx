@@ -54,13 +54,18 @@ export function AgentKiosk() {
     try {
       const origin = suggestionId ? "suggested" : "typed";
       for await (const event of askAgent({ question, origin, suggestion_id: suggestionId }, controller.signal)) {
+        // A newer question (or an idle reset) replaced this stream. Frames it already parsed must not
+        // land in the new question's state, so stop before dispatching.
+        if (controller !== abort.current || controller.signal.aborted) return;
         dispatch({ type: "event", event });
       }
       setOffline(false);
     } catch {
-      if (!controller.signal.aborted) setOffline(true);
+      if (controller !== abort.current || controller.signal.aborted) return;
+      setOffline(true);
     }
-    if (!controller.signal.aborted) dispatch({ type: "stream_cut" });
+    if (controller !== abort.current || controller.signal.aborted) return;
+    dispatch({ type: "stream_cut" });
   }, []);
 
   const reset = useCallback(() => {

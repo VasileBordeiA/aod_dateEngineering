@@ -7,7 +7,11 @@ export function AskForm({ busy, onAsk }: { busy: boolean; onAsk: (q: string) => 
   const [text, setText] = useState("");
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (text.trim()) onAsk(text.trim());
+    const question = text.trim();
+    if (!question) return;
+    // Clear at once: the kiosk is shared, and one visitor's free text is never shown to the next (invariant 8).
+    setText("");
+    onAsk(question);
   };
   return (
     <form onSubmit={submit} className="flex gap-3">
