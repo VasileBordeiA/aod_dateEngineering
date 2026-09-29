@@ -11,7 +11,8 @@ from openai import OpenAIError
 from openai.types.chat import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageFunctionToolCall
 
 from agent.providers import LLM
-from agent.tools import TOOL_DEFS, Emit, Toolbox
+from agent.tools import TOOL_DEFS, Emit, Toolbox, ToolOutcome
+from api.log import error_label
 
 NO_WORKING_QUERY = ("NO_WORKING_QUERY", "I couldn't write a working query for that. Try rephrasing, or pick a "
                                         "suggested question!")
@@ -49,8 +50,9 @@ async def chat(llm: LLM, messages: list[dict[str, Any]], *, temperature: float, 
     try:
         response = cast(ChatCompletion, await llm.client.chat.completions.create(**kwargs))
     except (OpenAIError, ValueError) as exc:  # connection, timeout, 4xx/5xx incl. 429, or a body that
-        # isn't valid JSON despite an application/json content-type (json.JSONDecodeError is a ValueError)
-        raise ProviderFailed(f"{type(exc).__name__}: {str(exc)[:200]}") from exc
+        # isn't valid JSON despite an application/json content-type (json.JSONDecodeError is a ValueError).
+        # Only the class name and HTTP status: the SDK's message can quote the provider's response body.
+        raise ProviderFailed(error_label(exc)) from exc
     if not response.choices:
         raise ProviderFailed("the response had no choices")
     return response.choices[0].message
@@ -62,6 +64,14 @@ def _arguments_preview(raw: str | None) -> dict[str, Any]:
     except ValueError:
         return {"raw": (raw or "")[:200]}
     return parsed if isinstance(parsed, dict) else {"raw": (raw or "")[:200]}
+
+
+async def traced_call(toolbox: Toolbox, call_id: str, name: str, raw: str | None, emit: Emit) -> ToolOutcome:
+    """One tool step as the UI sees it: tool_call, the tool's own events (sql/rows/chart), then tool_result."""
+    await emit("tool_call", {"id": call_id, "name": name, "arguments": _arguments_preview(raw)})
+    outcome = await toolbox.call(name, raw, emit)
+    await emit("tool_result", {"id": call_id, "name": name, "ok": outcome.ok, "summary": outcome.summary})
+    return outcome
 
 
 async def run_tools(llm: LLM, messages: list[dict[str, Any]], toolbox: Toolbox, emit: Emit, *, max_iterations: int,
@@ -93,9 +103,7 @@ async def run_tools(llm: LLM, messages: list[dict[str, Any]], toolbox: Toolbox, 
         for call_id, call in zip(ids, calls, strict=True):
             result.tool_calls += 1
             name, raw = call.function.name, call.function.arguments
-            await emit("tool_call", {"id": call_id, "name": name, "arguments": _arguments_preview(raw)})
-            outcome = await toolbox.call(name, raw, emit)
-            await emit("tool_result", {"id": call_id, "name": name, "ok": outcome.ok, "summary": outcome.summary})
+            outcome = await traced_call(toolbox, call_id, name, raw, emit)
             messages.append({"role": "tool", "tool_call_id": call_id, "content": outcome.content})
             if outcome.invalid:
                 result.invalid_tool_calls += 1

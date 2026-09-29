@@ -45,7 +45,9 @@ class RunRecord:
         elif event == "rows":
             self.final_sql = self.sql_attempts[-1] if self.sql_attempts else ""
             self.result_rows = int(data["row_count"])
-        elif event == "tool_call":
+        elif event == "tool_call" and self.mode != "oneshot":
+            # tool_calls means "the model called a tool". Oneshot wraps its own run_query/render_chart steps in
+            # tool_call/tool_result for the UI, but the model never made a tool call, so they don't count.
             self.tool_calls += 1
         elif event == "answer":
             self.answer = str(data["text"])

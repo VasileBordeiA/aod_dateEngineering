@@ -85,7 +85,8 @@ class AgentService:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.event("agent_crash", request_id=record.request_id, error=repr(exc)[:300])
+            log.event("agent_crash", request_id=record.request_id, error=log.error_label(exc),
+                      where=log.error_where(exc))
             await self._error(emit, "INTERNAL", "Something went wrong on our side. Try again!")
         finally:
             if record.error != "CLIENT_GONE":

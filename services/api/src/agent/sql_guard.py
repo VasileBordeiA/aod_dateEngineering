@@ -50,6 +50,7 @@ DENIED_FUNCTIONS = frozenset(
         "getmergetreesetting",
         "currentuser",
         "current_user",
+        "user",  # ClickHouse alias of currentUser()
         "throwif",
         # These take a table name as a string, so they would look at tables the whitelist can't see.
         "hascolumnintable",

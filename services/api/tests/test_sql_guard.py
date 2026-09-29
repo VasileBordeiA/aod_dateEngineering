@@ -34,6 +34,7 @@ ATTACKS = [
     "SELECT * FROM default.trips",
     "SELECT * FROM taxi.trips_rejected AS r JOIN system.one AS o ON 1 = 1",
     "SELECT currentUser()",
+    "SELECT user()",
     "SELECT dictGet('d', 'x', 1)",
     "SELECT throwIf(1)",
     "SELECT * FROM s3('https://bucket/x.csv')",

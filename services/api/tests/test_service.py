@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 from conftest import GOLDEN, FakeDb, make_config
-from fake_llm import FakeLLM, http, say, slow, tool
+from fake_llm import FakeLLM, http, raw, say, slow, tool
 
 import agent.service as service_module
 from agent.cache import CACHE_STATUS, TIMEOUT_CACHE_STATUS
@@ -179,3 +179,52 @@ async def test_client_disconnect_releases_slot_and_logs():
     assert db.logged and db.logged[0]["error"] == "CLIENT_GONE" and db.logged[0]["success"] is False
     events = await ask(svc, ip="10.0.0.2")  # the slot is free again
     assert events[-1][0] == "done"
+
+
+async def test_oneshot_failed_attempt_shows_as_a_failed_run_query_step():
+    bad = {"sql": "SELECT * FROM system.users", "purpose": "x"}
+    db = FakeDb({"system.tables": Result([("name", "String"), ("comment", "String")], [], 1),
+                 "DESCRIBE TABLE": Result([("name", "String"), ("type", "String"), ("comment", "String")],
+                                          [["tip_pct", "Float32", ""]], 1),
+                 "SELECT * FROM (": TIPS})
+    svc, _, _, _ = make({"local": [say(json.dumps(bad)), say(json.dumps(GOOD)), say("Manhattan riders tip best.")]},
+                        db=db, AGENT_MODE="oneshot")
+    events = await ask(svc)
+    steps = [(e, d) for e, d in events if e in ("tool_call", "tool_result")]
+    assert [(e, d["id"], d["name"]) for e, d in steps] == [
+        ("tool_call", "oneshot_1", "run_query"), ("tool_result", "oneshot_1", "run_query"),
+        ("tool_call", "oneshot_2", "run_query"), ("tool_result", "oneshot_2", "run_query")]
+    failed = steps[1][1]
+    assert failed["ok"] is False and "system.users" in failed["summary"]
+    assert ("status", {"text": "Fixing its own query…"}) in events and steps[3][1]["ok"] is True
+    done = events[-1][1]
+    assert done["mode"] == "oneshot" and done["tool_calls"] == 0 and done["repairs"] == 1
+    await settle()
+    row = db.logged[0]
+    assert row["tool_calls"] == 0 and row["refused"] is False and row["success"] is True
+    assert row["sql_attempts"] == [bad["sql"], GOOD["sql"]] and row["final_sql"] == GOOD["sql"]
+
+
+async def test_provider_error_body_never_reaches_the_logs(capsys):
+    body = json.dumps({"error": {"message": "Incorrect API key provided: sk-FAKE-leaked-1234567890"}})
+    svc, _, _, _ = make({"local": [raw(body, status=401)], "internal": [say("From the gateway.")]})
+    events = await ask(svc)
+    assert events[-2] == ("answer", {"text": "From the gateway."})
+    out = capsys.readouterr().out
+    assert "sk-FAKE-leaked" not in out and "Incorrect API key" not in out
+    failed = [json.loads(line) for line in out.splitlines() if '"provider_failed"' in line]
+    assert [f["reason"] for f in failed] == ["AuthenticationError 401"]
+
+
+async def test_crash_logs_only_the_exception_class_and_place(monkeypatch, capsys):
+    async def explode(*_: Any, **__: Any) -> None:
+        raise RuntimeError("secret sk-FAKE-crash-987 in the message")
+
+    monkeypatch.setattr(service_module, "run_tools", explode)
+    svc, _, _, _ = make()
+    events = await ask(svc)
+    assert events[-2][0] == "error" and events[-2][1]["code"] == "INTERNAL"
+    out = capsys.readouterr().out
+    assert "sk-FAKE-crash" not in out
+    crash = next(json.loads(line) for line in out.splitlines() if '"agent_crash"' in line)
+    assert crash["error"] == "RuntimeError" and crash["where"].startswith("test_service.py:")
