@@ -1,7 +1,8 @@
-from conftest import FakeDb, make_config
+from conftest import GOLDEN, FakeDb, make_config
 from fake_llm import FakeLLM
 from fastapi.testclient import TestClient
 
+from agent.golden import load_golden
 from agent.providers import ProviderPool
 from api.config import ProviderConfig
 from api.db import DbUnavailable, Result
@@ -87,3 +88,18 @@ def test_admin_disabled_when_token_empty():
         create_app(Deps(cfg=cfg, db=FakeDb(), sim_clock=Clock(), pool=ProviderPool([], (), lambda pc: None)))
     )
     assert c.post("/api/admin/llm/order", json={"order": []}, headers={"X-Admin-Token": ""}).status_code == 401
+
+
+def test_suggestions_route():
+    golden = tuple(load_golden(GOLDEN))
+    c = TestClient(create_app(Deps(cfg=make_config(), db=FakeDb(), sim_clock=Clock(), golden=golden)))
+    body = c.get("/api/suggestions").json()
+    assert [s["id"] for s in body] == ["best_tippers", "rush_hour_distance", "busiest_zones_last_hour",
+                                       "airport_vs_other", "rejected_why"]
+    assert set(body[0]) == {"id", "question"}
+
+
+def test_ask_validates_the_body():
+    c = TestClient(create_app(Deps(cfg=make_config(), db=FakeDb(), sim_clock=Clock())))
+    assert c.post("/api/agent/ask", json={"question": "   "}).status_code == 422
+    assert c.post("/api/agent/ask", json={"question": "hi", "origin": "admin"}).status_code == 422

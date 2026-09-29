@@ -7,13 +7,16 @@ import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field, field_validator
 
+from agent.catalog import Catalog
+from agent.golden import load_golden, suggestions
 from agent.providers import ProviderPool, openai_client
+from agent.service import AgentService, AskRequest
 from api.config import Config
 from api.db import ClickHouseDb, Db, DbError, DbUnavailable
 from api.simclock import SimClockFollower
@@ -35,6 +38,20 @@ class Deps:
 
 class OrderBody(BaseModel):
     order: list[str]
+
+
+class AskBody(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)  # the friendly limit (TOO_LONG) is AGENT_MAX_QUESTION_CHARS
+    origin: Literal["typed", "suggested", "ride"] = "typed"
+    suggestion_id: str | None = Field(default=None, max_length=64)
+    trace_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("question")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("question is blank")
+        return v
 
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
@@ -88,15 +105,32 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
         return dict(deps.pool.status()) | {"mode": deps.cfg.agent_mode}
 
+    @app.get("/api/suggestions")
+    async def get_suggestions() -> list[dict[str, str]]:
+        return [{"id": q.id, "question": q.question} for q in deps.golden if q.suggested]
+
+    @app.post("/api/agent/ask")
+    async def ask(body: AskBody, request: Request) -> StreamingResponse:
+        # uvicorn --proxy-headers: the host comes from X-Forwarded-For. It's only a rate-limit key, never logged.
+        client_ip = request.client.host if request.client else "unknown"
+        stream = deps.agent.ask(AskRequest(body.question, body.origin, body.suggestion_id, body.trace_id), client_ip)
+        return StreamingResponse(stream, media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     return app
 
 
 def app_from_env() -> FastAPI:
-    """uvicorn --factory entry point. Later tasks add the agent pieces here."""
+    """uvicorn --factory entry point."""
     cfg = Config.from_env()
     follower = SimClockFollower(cfg.brokers)
     pool = ProviderPool(cfg.providers, cfg.llm_order, lambda pc: openai_client(pc, cfg.llm_timeout_s))
-    deps = Deps(cfg=cfg, db=ClickHouseDb(cfg), sim_clock=follower, pool=pool)
+    golden = load_golden(cfg.golden_path)
+    suggestions(golden)  # fail fast: the file must mark exactly 5
+    db = ClickHouseDb(cfg)
+    catalog = Catalog(db)
+    agent = AgentService(cfg, db, pool, catalog, golden)
+    deps = Deps(cfg=cfg, db=db, sim_clock=follower, pool=pool, agent=agent, golden=tuple(golden))
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

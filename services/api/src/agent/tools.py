@@ -94,6 +94,12 @@ class ToolOutcome:
     query_failed: bool = False  # run_query rejected by the guard or ClickHouse: counts as a repair
 
 
+def rows_event(result: Result) -> dict[str, Any]:
+    return {"columns": [{"name": n, "type": t} for n, t in result.columns], "rows": result.rows[:UI_ROWS],
+            "row_count": len(result.rows), "truncated": len(result.rows) >= SAFETY_LIMIT,
+            "elapsed_ms": result.elapsed_ms}
+
+
 def _error(summary: str, message: str, **flags: bool) -> ToolOutcome:
     return ToolOutcome(False, summary[:120], json.dumps({"error": message}), **flags)
 
@@ -159,23 +165,14 @@ class Toolbox:
         except DbError as exc:
             return _error(str(exc), str(exc), query_failed=True)
         self.last_result = result
-        truncated = len(result.rows) >= SAFETY_LIMIT
-        await emit(
-            "rows",
-            {
-                "columns": [{"name": n, "type": t} for n, t in result.columns],
-                "rows": result.rows[:UI_ROWS],
-                "row_count": len(result.rows),
-                "truncated": truncated,
-                "elapsed_ms": result.elapsed_ms,
-            },
-        )
+        event = rows_event(result)
+        await emit("rows", event)
         content = json.dumps(
             {
                 "columns": result.names,
                 "rows": result.rows[:LLM_ROWS],
                 "row_count": len(result.rows),
-                "truncated": truncated,
+                "truncated": event["truncated"],
             },
             default=str,
         )
