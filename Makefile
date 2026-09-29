@@ -91,4 +91,19 @@ docs-check: ## Diagrams in sync + all Mermaid renders + contracts valid
 	bash scripts/check_mermaid.sh
 	uv run pytest -q contracts/tests
 
-.PHONY: help secrets data up down reset status logs images test test-integration test-stack lint smoke backfill pause resume speed migrate diagrams-sync docs-check
+eval: ## Golden-set eval on the running api: make eval MODEL=taxi-qwen2.5-coder-14b [MODE=tools|oneshot] [PROVIDER=local] [ONLY=id,id]
+	LLM_LOCAL_MODEL="$(or $(MODEL),$(LLM_LOCAL_MODEL))" AGENT_MODE="$(or $(MODE),$(AGENT_MODE))" \
+	  LLM_ORDER="$(or $(PROVIDER),$(LLM_ORDER))" $(COMPOSE) up -d --wait api
+	uv run python scripts/eval_agent.py --model "$(or $(MODEL),$(LLM_LOCAL_MODEL))" \
+	  --mode "$(or $(MODE),$(AGENT_MODE))" --provider "$(or $(PROVIDER),$(LLM_ORDER))" $(if $(ONLY),--only $(ONLY))
+	@echo "api still runs the eval settings; 'make up' restores .env"
+
+llm: ## Switch the LLM provider order live: make llm ORDER=internal,local (ORDER= means cached answers only)
+	@curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" -H 'Content-Type: application/json' \
+	  -d "$$(python3 -c 'import json,sys; print(json.dumps({"order": [n for n in sys.argv[1].split(",") if n]}))' '$(ORDER)')" \
+	  http://127.0.0.1:8000/api/admin/llm/order && echo
+
+ollama-model: ## Derive a stand model with a 16 k context: make ollama-model BASE=qwen2.5-coder:14b
+	@bash scripts/ollama_model.sh "$(BASE)"
+
+.PHONY: help secrets data up down reset status logs images test test-integration test-stack lint smoke backfill pause resume speed migrate diagrams-sync docs-check eval llm ollama-model
