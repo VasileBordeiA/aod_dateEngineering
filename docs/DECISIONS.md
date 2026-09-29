@@ -217,3 +217,49 @@ Format: context → decision → consequences → alternatives rejected. To chan
 **Rejected:**
 - A second Grafana organisation. It's the same isolation, but the org has to exist before provisioning, which needs an extra API bootstrap step.
 - A hidden folder, which isn't isolation at all.
+
+## ADR-018: Local model for the agent (M3 eval)
+**Status:** accepted · 2026-09-29
+
+**Context:** The M3 golden-set eval (spec 10) on the stand laptop's candidates, each derived with `num_ctx 16384` and
+`temperature 0` (`make ollama-model`), replayer paused, model warm. 30 scored questions; the 2 ride questions wait for M4.
+
+| Model | Mode | Accuracy | Suggested | Refusals | p50 / p95 | Tool-call validity |
+|---|---|---|---|---|---|---|
+| qwen2.5-coder:14b | tools | 20% | 0% | all pass | 3.3 s / 5.7 s | 100% |
+| qwen3:14b | tools | dropped — not a full run (see below) | | | ≈38 s per call | |
+| llama3.1:8b | tools | 20% | 0% | all pass | 5.1 s / 8.5 s | 100% |
+| **qwen2.5-coder:14b** | **oneshot** | **80%** | **100%** | **all pass** | **6.8 s / 12.5 s** | **100%** |
+| llama3.1:8b | oneshot | 47% | 40% | FAIL (3 refusals gave "no answer") | 4.0 s / 13.4 s | 100% |
+
+`qwen3:14b` (tools) did complete its 30-question run (`evals/reports/2026-09-29-taxi-qwen3-14b-tools.md`: 23% accuracy,
+0% suggested, p50 34.5 s / p95 45.0 s), but it is marked dropped here rather than scored on its own merits: it is a
+"thinking" model whose per-call latency routinely exceeds `LLM_TIMEOUT_S=30 s` (the api log shows most questions
+taking 30–45 s, ending in `LLM_UNAVAILABLE`/`TIMEOUT`, falling back to cached SQL for the suggested questions). That
+alone rules it out for a 2–3-minute stand visit, so the user chose to skip its oneshot run rather than spend more
+eval time confirming a foregone conclusion.
+
+**Decision:** `LLM_LOCAL_MODEL=qwen2.5-coder:14b` (derived as `taxi-qwen2.5-coder-14b`, `num_ctx 16384`), `AGENT_MODE=oneshot`,
+because it is the only run that clears every spec-06 target (≥ 80% overall, 100% suggested, p95 < 15 s, all refusals
+pass), and by the model-selection ordering (100% suggested → accuracy → p95 → tool-call validity) it wins outright:
+no other run reached 100% on the 5 suggested questions.
+
+**Consequences:**
+- `ollama ps` while warm: `taxi-qwen2.5-coder-14b` loads at **12 GB, 100% GPU**, `taxi-llama3.1-8b` at 7.0 GB — both
+  fit the 32 GB laptop alongside the Compose stack, but only one is loaded at the stand.
+- Latency on the stand: p50 6.8 s / p95 12.5 s (model warm) — comfortably inside a 2–3 minute visit, but close enough
+  to `AGENT_TOTAL_TIMEOUT_S=45 s` and `LLM_TIMEOUT_S=30 s` that a cold-loaded model (first question after an idle
+  gap) should be watched; `OLLAMA_KEEP_ALIVE=-1` (RUNBOOK) is what keeps it off the 10–20 s reload path.
+- **Tool-call-as-text, observed per model:** every `tools`-mode run had `tool_calls: 0` / `invalid_tool_calls: 0` on
+  its failures — none of the three local models actually emitted an OpenAI-style tool call for `run_query`. Instead:
+  - `qwen2.5-coder:14b` wrote the call as a bare JSON object in the answer content: `{"name": "run_query", "arguments": {...}}`.
+  - `llama3.1:8b` wrote a similar JSON object but with a different shape (`"parameters"` instead of `"arguments"`),
+    sometimes prefixed with a sentence of prose.
+  - `qwen3:14b` did emit real answers for a few questions but mostly exceeded `LLM_TIMEOUT_S` before finishing a turn,
+    so most "failures" are `LLM_UNAVAILABLE`/cache fallback rather than a bad tool call.
+  This is exactly why `oneshot` mode (JSON-object response format, no tool-calling round trip) is the mode that
+  works for these local models — it's noted in spec 06's "Implementation notes (M3)".
+- Watch in the soak: agent suggested-question success (≥ 99% target) and p95 latency under real concurrency
+  (`AGENT_MAX_CONCURRENCY=2`), since the eval above is single-request and model-warm.
+- Full reports: `evals/reports/2026-09-29-taxi-{qwen2.5-coder-14b,qwen3-14b,llama3.1-8b}-{tools,oneshot}.{md,json}`
+  (git-ignored; kept locally for reference).

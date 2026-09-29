@@ -264,3 +264,68 @@ def test_panel_query_is_fast(user, password_key, name, sql):
     c = client(user, password_key)
     elapsed = sorted(int(c.query(sql).summary["elapsed_ns"]) / 1e6 for _ in range(3))
     assert elapsed[1] < 500, f"{name}: {elapsed[1]:.0f} ms"
+
+
+# ── Agent (spec 06) ───────────────────────────────────────────────────────────
+API = "http://localhost/api"  # through Caddy, as the kiosk sees it
+AGENT_EVENTS = {"status", "tool_call", "tool_result", "sql", "rows", "chart", "answer", "error", "done"}
+
+
+def sse(body: dict, timeout: float = 60) -> tuple[list[tuple[str, dict]], float]:
+    req = urllib.request.Request(f"{API}/agent/ask", method="POST", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    started = time.monotonic()
+    events, name = [], ""
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        assert r.headers["Content-Type"].startswith("text/event-stream")
+        for raw in r:
+            line = raw.decode().rstrip("\n")
+            if line.startswith("event: "):
+                name = line.removeprefix("event: ")
+            elif line.startswith("data: "):
+                events.append((name, json.loads(line.removeprefix("data: "))))
+    return events, time.monotonic() - started
+
+
+def _admin_order(order: list[str]) -> int:
+    req = urllib.request.Request(f"{API}/admin/llm/order", method="POST", data=json.dumps({"order": order}).encode(),
+                                 headers={"Content-Type": "application/json", "X-Admin-Token": env()["ADMIN_TOKEN"]})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status
+
+
+def test_api_basics_through_caddy():
+    assert http("GET", f"{API}/healthz")[1]["clickhouse"] is True
+    status, zones = http("GET", f"{API}/zones")
+    assert status == 200 and len(zones) >= 255 and zones[0]["borough"] == "Bronx"
+    status, clock = http("GET", f"{API}/sim/clock")
+    assert status == 200 and "sim_ts" in clock
+    status, suggestions = http("GET", f"{API}/suggestions")
+    assert status == 200 and len(suggestions) == 5
+
+
+def test_admin_order_needs_the_token():
+    assert http("POST", f"{API}/admin/llm/order", {"order": []})[0] == 401
+
+
+def test_suggested_question_answers_through_caddy():
+    events, _ = sse({"question": "Which borough has the best tippers?", "origin": "suggested",
+                     "suggestion_id": "best_tippers"})
+    names = [e for e, _ in events]
+    assert set(names) <= AGENT_EVENTS and names[-1] == "done" and "answer" in names
+    assert any(e == "sql" for e in names), "the SQL must always be shown"
+
+
+def test_cache_only_mode_is_fast_and_honest():
+    """Spec 06 acceptance 6, with the provider order emptied instead of stopping Ollama (the drill is in M5)."""
+    original = http("GET", f"{API}/llm/status")[1]["order"]
+    try:
+        assert _admin_order([]) == 200
+        events, seconds = sse({"question": "Which borough has the best tippers?", "origin": "suggested",
+                               "suggestion_id": "best_tippers"})
+        done = events[-1][1]
+        assert done["cached"] is True and done["mode"] == "cached" and seconds < 2
+        events, seconds = sse({"question": "How many trips were there?", "origin": "typed"})
+        assert ("error" in [e for e, _ in events]) and events[-2][1]["code"] == "LLM_UNAVAILABLE" and seconds < 1
+    finally:
+        _admin_order(original)

@@ -114,6 +114,25 @@ Each event has the form `event: <type>\ndata: <json>\n\n`. The order is guarante
 
 ## Behaviour
 
+### Implementation notes (M3)
+- Event order inside a tool call: `tool_call`, then `sql` (every attempt, even one the guard rejects), then `rows`
+  (on success), then `tool_result`. For `render_chart` it's `tool_call`, `chart`, `tool_result`.
+- Additive fields: `error.retry_after_s` (`RATE_LIMITED`); `done.tool_calls`, `done.invalid_tool_calls`, `done.repairs`.
+- On a deadline, a suggested question falls back to the cache with the status "That took too long, so I'm using a
+  pre-written query on live data", instead of emitting `error TIMEOUT` first.
+- An empty reply with no tool calls counts as a provider failure. A text reply with no tool calls is an answer;
+  refusals are text replies.
+- `refused` in `agent_log` means an answer without any SQL attempt.
+- `POST /api/admin/llm/order {"order": []}` switches to cached answers only (`make llm ORDER=`).
+- New env keys: `AGENT_MAX_QUEUE`, `AGENT_GOLDEN_PATH`, `LLM_HEALTH_INTERVAL_S`.
+- `GET /api/llm/status` returns an object `{providers, order, active, mode}`, where `active` is one of
+  `"local" | "internal" | "cache"`.
+- Model selection (ADR-018): `qwen2.5-coder:14b` and `llama3.1:8b` in `tools` mode never emit a real OpenAI-style
+  tool call for `run_query` — they write it as JSON text in the message content instead (`tool_calls: 0` in every
+  failure). `qwen3:14b` is a "thinking" model whose per-call latency routinely exceeds `LLM_TIMEOUT_S`. `oneshot`
+  mode (schema in the prompt, `response_format={"type":"json_object"}`, no tool-calling round trip) is what actually
+  works with these local models; the chosen combination is `qwen2.5-coder:14b` + `oneshot`.
+
 ### Tools (OpenAI function-calling format)
 ```json
 [

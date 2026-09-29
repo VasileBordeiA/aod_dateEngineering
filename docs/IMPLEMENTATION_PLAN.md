@@ -71,7 +71,7 @@ gantt
 - [x] **A** ClickHouse DDL + users/profiles (`infra/clickhouse/init/*.sql`, `users.d/*.xml`) and the zones loader (spec 04).
 - [x] **A** Replayer: pacing with a fake-clock unit test, producer, `sim.clock`, state file, control API, backfill mode (spec 01).
 - [x] **A** Processor: validation rules (TDD), enrichment (TDD), branching, ClickHouse sinks for trips and rejects (spec 03).
-- [ ] **B** *(moved to the M3 plan)* Start the api skeleton in parallel: FastAPI app, config, ClickHouse clients, `/api/healthz`, `/api/zones`, `/api/sim/clock`.
+- [x] **B** *(moved to the M3 plan)* Start the api skeleton in parallel: FastAPI app, config, ClickHouse clients, `/api/healthz`, `/api/zones`, `/api/sim/clock`.
 
 **Exit:** at 60×, `SELECT count() FROM taxi.trips` grows by about 80–200 rows/s. Rejected rows appear with reasons. Freshness is `now64() - max(stored_at)` < 3 s.
 
@@ -83,11 +83,11 @@ gantt
 **Exit:** the dashboard updates every 5 s with no errors. The geomap shows zones. The rejected-reasons panel is populated.
 
 ### M3: AI data agent (D5–D9)
-- [ ] **B** Tools, the SQL guard (TDD with the attack list in spec 06), the tool loop, SSE events, `agent_log` (spec 06).
-- [ ] **B** LLM provider chain + health checks. `AGENT_MODE=oneshot` fallback. Cached reference-SQL answers for the 5 suggested questions.
-- [ ] **B** Eval harness `make eval` (spec 10). Run it on each candidate model and pick one. **Record the scores in DECISIONS (new ADR).**
-- [ ] **C** Next.js app scaffold (use the `setup-nextjs-project` skill) and the `/agent` page: suggestion buttons, step timeline, SQL panel, table, chart (spec 08).
-- [ ] **C** Caddy routes for `/`, `/api/*`, `/grafana/*`, with SSE working end-to-end through Caddy.
+- [x] **B** Tools, the SQL guard (TDD with the attack list in spec 06), the tool loop, SSE events, `agent_log` (spec 06).
+- [x] **B** LLM provider chain + health checks. `AGENT_MODE=oneshot` fallback. Cached reference-SQL answers for the 5 suggested questions.
+- [x] **B** Eval harness `make eval` (spec 10). Run it on each candidate model and pick one. **Record the scores in DECISIONS (new ADR).**
+- [x] **C** Next.js app scaffold (use the `setup-nextjs-project` skill) and the `/agent` page: suggestion buttons, step timeline, SQL panel, table, chart (spec 08). `/ride`, `/trace/*`, `/architecture` and `/qr` come later (M4/M5).
+- [x] **C** Caddy routes for `/`, `/api/*`, `/grafana/*`, with SSE working end-to-end through Caddy.
 
 **Exit:** ≥ 80% on the golden set, 100% on the 5 suggested questions, p95 < 15 s with the local model. Off-topic and injection questions are refused.
 
@@ -110,7 +110,7 @@ Run the core (replayer, processor, ClickHouse, Grafana, agent) for **2 h unatten
 ### M5: Hardening & rehearsal (D12–D14)
 - [ ] **All** 10-hour soak (`make soak`), which can run overnight D12→D13. Fix everything it finds (spec 10).
 - [ ] **All** Chaos drills: kill processor, stop ClickHouse for 60 s, pull the internet, restart Ollama (spec 10). Update the RUNBOOK with what actually happened.
-- [ ] **C** `/architecture` clickable page (cut line 1). Posters: the architecture diagram and the "How it works" steps. QR codes printed at A5, for Wi-Fi join and for the ride URL.
+- [ ] **C** `/architecture` clickable page (cut line 1), plus `/api/stats` (moved here from M3). Posters: the architecture diagram and the "How it works" steps. QR codes printed at A5, for Wi-Fi join and for the ride URL.
 - [ ] **All** `make preflight` script complete (RUNBOOK).
 - [ ] **All** Record a 3-minute fallback video of the full demo.
 - [ ] **All** Full rehearsal with someone who hasn't seen it, using DEMO_SCRIPT. Time it.
