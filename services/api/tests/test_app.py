@@ -1,6 +1,9 @@
 from conftest import FakeDb, make_config
+from fake_llm import FakeLLM
 from fastapi.testclient import TestClient
 
+from agent.providers import ProviderPool
+from api.config import ProviderConfig
 from api.db import DbUnavailable, Result
 from api.main import Deps, create_app
 
@@ -21,13 +24,18 @@ def test_healthz_reports_dependencies():
 
 
 def test_zones_are_sorted_and_cached():
-    zones = Result([("location_id", "UInt16"), ("zone", "String"), ("borough", "LowCardinality(String)")],
-                   [[4, "Alphabet City", "Manhattan"], [132, "JFK Airport", "Queens"]], 2)
+    zones = Result(
+        [("location_id", "UInt16"), ("zone", "String"), ("borough", "LowCardinality(String)")],
+        [[4, "Alphabet City", "Manhattan"], [132, "JFK Airport", "Queens"]],
+        2,
+    )
     db = FakeDb({"FROM taxi.zones": zones})
     c = client(db)
     first = c.get("/api/zones").json()
-    assert first == [{"location_id": 4, "zone": "Alphabet City", "borough": "Manhattan"},
-                     {"location_id": 132, "zone": "JFK Airport", "borough": "Queens"}]
+    assert first == [
+        {"location_id": 4, "zone": "Alphabet City", "borough": "Manhattan"},
+        {"location_id": 132, "zone": "JFK Airport", "borough": "Queens"},
+    ]
     assert c.get("/api/zones").json() == first
     assert len(db.queries) == 1
     assert "ORDER BY borough, zone" in db.queries[0] and "BETWEEN 1 AND 263" in db.queries[0]
@@ -46,3 +54,36 @@ def test_sim_clock_503_until_first_heartbeat():
     assert c.get("/api/sim/clock").status_code == 503
     clock.latest = {"sim_ts": "2025-10-07T08:00:00"}
     assert c.get("/api/sim/clock").json() == {"sim_ts": "2025-10-07T08:00:00"}
+
+
+def app_with_pool() -> tuple[TestClient, ProviderPool]:
+    cfg = make_config()
+    fakes = {"local": FakeLLM()}
+    p = ProviderPool(
+        [ProviderConfig("local", "http://x/v1", "k", "fake-local")], cfg.llm_order, lambda pc: fakes[pc.name].client()
+    )
+    return TestClient(create_app(Deps(cfg=cfg, db=FakeDb(), sim_clock=Clock(), pool=p))), p
+
+
+def test_llm_status():
+    c, _ = app_with_pool()
+    body = c.get("/api/llm/status").json()
+    assert body["active"] == "local" and body["providers"][0]["model"] == "fake-local"
+
+
+def test_admin_order_needs_the_token():
+    c, p = app_with_pool()
+    assert c.post("/api/admin/llm/order", json={"order": []}).status_code == 401
+    assert c.post("/api/admin/llm/order", json={"order": []}, headers={"X-Admin-Token": "nope"}).status_code == 401
+    ok = c.post("/api/admin/llm/order", json={"order": []}, headers={"X-Admin-Token": "t0ken"})
+    assert ok.status_code == 200 and ok.json()["active"] == "cache" and p.order == []
+    bad = c.post("/api/admin/llm/order", json={"order": ["cloud"]}, headers={"X-Admin-Token": "t0ken"})
+    assert bad.status_code == 400
+
+
+def test_admin_disabled_when_token_empty():
+    cfg = make_config(ADMIN_TOKEN="")
+    c = TestClient(
+        create_app(Deps(cfg=cfg, db=FakeDb(), sim_clock=Clock(), pool=ProviderPool([], (), lambda pc: None)))
+    )
+    assert c.post("/api/admin/llm/order", json={"order": []}, headers={"X-Admin-Token": ""}).status_code == 401
