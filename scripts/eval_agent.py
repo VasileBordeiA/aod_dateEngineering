@@ -86,6 +86,18 @@ def pctl(values: list[float], q: float) -> float:
     return ordered[min(len(ordered) - 1, round(q * (len(ordered) - 1)))]
 
 
+def error_result(q: dict[str, Any], total_s: float, exc: BaseException) -> dict[str, Any]:
+    """One question's ask()/reference-query/check raised. Score it as a FAIL with the same shape as a normal
+    result (same keys, zero counters, no answer/SQL) instead of letting the exception abort the whole run and
+    lose every result scored so far (spec 10 acceptance 2: 'make eval produces a report'). Pure, so it's unit-tested
+    without a live stack."""
+    return {"id": q["id"], "suggested": bool(q.get("suggested")), "category": q["category"], "ok": False,
+            "why": f"request failed: {type(exc).__name__}: {str(exc)[:120]}", "first_s": 0.0,
+            "total_s": round(total_s, 2), "tool_calls": 0, "invalid_tool_calls": 0, "repairs": 0,
+            "provider": None, "mode": None, "error": "", "answer": "", "agent_sql": "",
+            "reference_sql": q["reference_sql"]}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
@@ -124,27 +136,32 @@ def main(argv: list[str] | None = None) -> int:
             payload: dict[str, Any] = {"question": q["question"], "origin": q.get("origin", "typed")}
             if q.get("suggested"):
                 payload["suggestion_id"] = q["id"]
-            events, first_s, total_s = ask(args.api, payload, f"10.250.0.{i + 2}", args.timeout)
-            by = {}
-            for e, d in events:
-                by.setdefault(e, []).append(d)
-            answer = by["answer"][-1]["text"] if "answer" in by else None
-            rows = by["rows"][-1] if "rows" in by else None
-            done = by.get("done", [{}])[-1]
-            ref = ch.query(q["reference_sql"])
-            ok, why = check_result(q["check"], agent_rows=rows["rows"] if rows else None,
-                                   ref_columns=ref.column_names, ref_rows=[plain(r) for r in ref.result_rows],
-                                   answer=answer, had_rows=rows is not None,
-                                   answer_mentions=q.get("answer_mentions", ()), cached=bool(done.get("cached")))
-            results.append({"id": q["id"], "suggested": bool(q.get("suggested")), "category": q["category"],
-                            "ok": ok, "why": why, "first_s": round(first_s, 2), "total_s": round(total_s, 2),
-                            "tool_calls": done.get("tool_calls", 0),
-                            "invalid_tool_calls": done.get("invalid_tool_calls", 0),
-                            "repairs": done.get("repairs", 0), "provider": done.get("provider"),
-                            "mode": done.get("mode"), "error": by["error"][-1]["code"] if "error" in by else "",
-                            "answer": answer, "agent_sql": by["sql"][-1]["sql"] if "sql" in by else "",
-                            "reference_sql": q["reference_sql"]})
-            print(f"{'PASS' if ok else 'FAIL'} {q['id']:<28} {total_s:5.1f} s  {why}")
+            started = time.monotonic()
+            try:
+                events, first_s, total_s = ask(args.api, payload, f"10.250.0.{i + 2}", args.timeout)
+                by: dict[str, list[Any]] = {}
+                for e, d in events:
+                    by.setdefault(e, []).append(d)
+                answer = by["answer"][-1]["text"] if "answer" in by else None
+                rows = by["rows"][-1] if "rows" in by else None
+                done = by.get("done", [{}])[-1]
+                ref = ch.query(q["reference_sql"])
+                ok, why = check_result(q["check"], agent_rows=rows["rows"] if rows else None,
+                                       ref_columns=ref.column_names, ref_rows=[plain(r) for r in ref.result_rows],
+                                       answer=answer, had_rows=rows is not None,
+                                       answer_mentions=q.get("answer_mentions", ()), cached=bool(done.get("cached")))
+                result = {"id": q["id"], "suggested": bool(q.get("suggested")), "category": q["category"],
+                          "ok": ok, "why": why, "first_s": round(first_s, 2), "total_s": round(total_s, 2),
+                          "tool_calls": done.get("tool_calls", 0),
+                          "invalid_tool_calls": done.get("invalid_tool_calls", 0),
+                          "repairs": done.get("repairs", 0), "provider": done.get("provider"),
+                          "mode": done.get("mode"), "error": by["error"][-1]["code"] if "error" in by else "",
+                          "answer": answer, "agent_sql": by["sql"][-1]["sql"] if "sql" in by else "",
+                          "reference_sql": q["reference_sql"]}
+            except Exception as exc:  # one bad question must not abort the run (spec 10 acceptance 2)
+                result = error_result(q, time.monotonic() - started, exc)
+            results.append(result)
+            print(f"{'PASS' if result['ok'] else 'FAIL'} {q['id']:<28} {result['total_s']:5.1f} s  {result['why']}")
     finally:
         request("POST", f"{args.control}/resume", headers=admin)
 
