@@ -1,0 +1,54 @@
+event: status
+data: {"text":"Reading the question…"}
+
+event: tool_call
+data: {"id":"c1","name":"list_tables","arguments":{}}
+
+event: tool_result
+data: {"id":"c1","name":"list_tables","ok":true,"summary":"6 tables"}
+
+event: tool_call
+data: {"id":"c2","name":"describe_table","arguments":{"table":"trips"}}
+
+event: tool_result
+data: {"id":"c2","name":"describe_table","ok":true,"summary":"38 columns"}
+
+event: tool_call
+data: {"id":"c3","name":"run_query","arguments":{}}
+
+event: sql
+data: {"attempt":1,"sql":"SELECT pu_borough, avg(tip) FROM taxi.trips GROUP BY pu_borough","purpose":"Average tip per borough"}
+
+event: tool_result
+data: {"id":"c3","name":"run_query","ok":false,"summary":"Code: 47. DB::Exception: Unknown expression identifier `tip`"}
+
+event: status
+data: {"text":"Fixing its own query…"}
+
+event: tool_call
+data: {"id":"c4","name":"run_query","arguments":{}}
+
+event: sql
+data: {"attempt":2,"sql":"SELECT pu_borough AS borough, round(avg(tip_pct), 1) AS avg_tip_pct FROM taxi.trips WHERE is_card GROUP BY borough ORDER BY avg_tip_pct DESC","purpose":"Average card tip per borough"}
+
+event: rows
+data: {"columns":[{"name":"borough","type":"String"},{"name":"avg_tip_pct","type":"Float64"}],"rows":[["Manhattan",23.1],["Queens",20.7],["Brooklyn",19.4],["Bronx",8.2],["Staten Island",6.9]],"row_count":5,"truncated":false,"elapsed_ms":84}
+
+event: tool_result
+data: {"id":"c4","name":"run_query","ok":true,"summary":"5 rows in 84 ms"}
+
+event: tool_call
+data: {"id":"c5","name":"render_chart","arguments":{"type":"bar"}}
+
+event: chart
+data: {"type":"bar","x":"borough","y":["avg_tip_pct"],"title":"Average card tip by pickup borough","unit":"pct"}
+
+event: tool_result
+data: {"id":"c5","name":"render_chart","ok":true,"summary":"bar chart"}
+
+event: answer
+data: {"text":"Manhattan riders tip best: 23.1% of the fare on average. Note: only card tips are recorded in NYC taxi data."}
+
+event: done
+data: {"request_id":"r1","provider":"local","model":"qwen2.5-coder:14b","mode":"tools","cached":false,"latency_ms":6200,"tool_calls":5,"invalid_tool_calls":0,"repairs":1}
+

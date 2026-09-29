@@ -48,6 +48,7 @@ test: ## Unit + contract tests (no Docker needed)
 	cd services/processor && uv run pytest -q
 	cd services/api && uv run pytest -q
 	cd web && pnpm test
+	cd web && pnpm test:e2e  # Playwright against a mocked api (spec 10), no stack needed
 
 test-integration: ## testcontainers integration tests (needs Docker running)
 	cd services/replayer && uv run pytest -q -m integration
