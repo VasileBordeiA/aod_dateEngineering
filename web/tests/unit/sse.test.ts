@@ -54,4 +54,34 @@ describe("readSse", () => {
     for await (const e of readSse(body)) events.push(e);
     expect(events.map((e) => e.event)).toEqual(["status", "done"]);
   });
+
+  it("reassembles a multi-byte character split across chunks", async () => {
+    // "…" is E2 80 A6 in UTF-8: split right after the lead byte.
+    const bytes = new TextEncoder().encode('event: status\ndata: {"text":"Reading the question…"}\n\n');
+    const cut = bytes.indexOf(0xe2) + 1;
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(bytes.slice(0, cut));
+        c.enqueue(bytes.slice(cut));
+        c.close();
+      },
+    });
+    const events: SseEvent[] = [];
+    for await (const e of readSse(body)) events.push(e);
+    expect(events).toEqual([{ event: "status", data: '{"text":"Reading the question…"}' }]);
+  });
+
+  it("flushes a dangling UTF-8 lead byte at stream end as a replacement character", async () => {
+    const head = new TextEncoder().encode('event: status\ndata: {"text":"a');
+    const bytes = new Uint8Array([...head, 0xe2]); // lead byte of "…", never completed
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(bytes);
+        c.close();
+      },
+    });
+    const events: SseEvent[] = [];
+    for await (const e of readSse(body)) events.push(e);
+    expect(events).toEqual([{ event: "status", data: '{"text":"a�' }]);
+  });
 });

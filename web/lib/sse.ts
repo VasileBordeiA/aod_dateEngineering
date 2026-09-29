@@ -54,6 +54,9 @@ export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator
       parser.feed(decoder.decode(value, { stream: true }));
       while (queue.length > 0) yield queue.shift() as SseEvent;
     }
+    // Flush: a stream that ends mid multi-byte character (a dangling lead byte) must still surface
+    // it (as U+FFFD) rather than silently dropping the carried-over bytes.
+    parser.feed(decoder.decode());
     parser.end();
     while (queue.length > 0) yield queue.shift() as SseEvent;
   } finally {

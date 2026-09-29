@@ -1,6 +1,8 @@
 import Link from "next/link";
 
-const GRAFANA = process.env.NEXT_PUBLIC_GRAFANA_PATH ?? "/grafana/";
+// "||" not "??": compose interpolates a missing/empty env var as "" (not undefined), and Next
+// bakes NEXT_PUBLIC_* in at build time, so "??" would keep that empty string.
+const GRAFANA = process.env.NEXT_PUBLIC_GRAFANA_PATH || "/grafana/";
 
 const tiles = [
   { href: "/agent", title: "Ask the data", text: "Ask a question in plain English and watch the AI write the SQL." },
