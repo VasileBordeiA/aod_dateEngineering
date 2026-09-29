@@ -1,5 +1,5 @@
 import type { RowsData, Unit } from "@/lib/agent-events";
-import { formatValue } from "@/lib/format";
+import { formatValue, rowCountLabel } from "@/lib/format";
 
 const NUMERIC = /^(Nullable\()?(U?Int|Float|Decimal)/;
 
@@ -37,7 +37,7 @@ export function ResultTable({ rows, unit, valueColumns }: { rows: RowsData; unit
         </table>
       </div>
       <p className="border-t border-line px-3 py-2 text-sm text-muted">
-        {rows.truncated ? `Showing ${rows.rows.length} of ${rows.row_count} rows (safety LIMIT 200)` : `${rows.row_count} rows`} · {rows.elapsed_ms} ms
+        {rowCountLabel(rows)} · {rows.elapsed_ms} ms
       </p>
     </div>
   );

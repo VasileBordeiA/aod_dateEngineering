@@ -49,4 +49,47 @@ describe("reduce", () => {
     expect(reduce(s, { type: "start", question: "new" })).toEqual({ ...initialState, phase: "running", question: "new" });
     expect(reduce(s, { type: "reset" })).toEqual(initialState);
   });
+
+  it("drops the old run's SQL, rows and chart when the backup model or the cache takes over", () => {
+    const firstRun: AgentEvent[] = [
+      { type: "tool_call", data: { id: "oneshot_1", name: "run_query", arguments: {} } },
+      { type: "sql", data: { attempt: 1, sql: "SELECT 1", purpose: "x" } },
+      { type: "rows", data: { columns: [{ name: "x", type: "UInt8" }], rows: [[1]], row_count: 1, truncated: false, elapsed_ms: 1 } },
+      { type: "tool_result", data: { id: "oneshot_1", name: "run_query", ok: true, summary: "1 rows in 1 ms" } },
+      { type: "tool_call", data: { id: "oneshot_2", name: "render_chart", arguments: {} } },
+      { type: "chart", data: { type: "number", x: "x", y: ["x"], title: "t", unit: "none" } },
+      { type: "tool_result", data: { id: "oneshot_2", name: "render_chart", ok: true, summary: "number chart" } },
+    ];
+    for (const text of [
+      "Switching to the backup model…",
+      "AI is offline, so I'm using a pre-written query on live data",
+      "That took too long, so I'm using a pre-written query on live data",
+    ]) {
+      const s = run([...firstRun, { type: "status", data: { text } }]);
+      expect(s.attempts).toEqual([]);
+      expect(s.rows).toBeUndefined();
+      expect(s.chart).toBeUndefined();
+      expect(s.question).toBe("q");
+      expect(s.steps).toHaveLength(3);
+      expect(s.steps.at(-1)).toEqual({ kind: "status", text });
+    }
+    const other = run([...firstRun, { type: "status", data: { text: "Fixing its own query…" } }]);
+    expect(other.attempts).toHaveLength(1);
+    expect(other.rows).toBeDefined();
+  });
+
+  it("a retried run that reuses a step id only finishes its own step", () => {
+    const s = run([
+      { type: "tool_call", data: { id: "oneshot_1", name: "run_query", arguments: {} } },
+      { type: "sql", data: { attempt: 1, sql: "SELECT bad", purpose: "x" } },
+      { type: "tool_result", data: { id: "oneshot_1", name: "run_query", ok: false, summary: "boom" } },
+      { type: "status", data: { text: "Switching to the backup model…" } },
+      { type: "tool_call", data: { id: "oneshot_1", name: "run_query", arguments: {} } },
+      { type: "sql", data: { attempt: 1, sql: "SELECT good", purpose: "x" } },
+      { type: "tool_result", data: { id: "oneshot_1", name: "run_query", ok: true, summary: "1 rows in 1 ms" } },
+    ]);
+    expect(s.steps[0]).toMatchObject({ kind: "tool", state: "failed", summary: "boom" });
+    expect(s.steps[2]).toMatchObject({ kind: "tool", state: "ok", summary: "1 rows in 1 ms" });
+    expect(s.attempts).toEqual([{ attempt: 1, sql: "SELECT good", purpose: "x" }]);
+  });
 });

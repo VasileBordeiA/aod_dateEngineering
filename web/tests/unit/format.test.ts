@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactNumber, formatValue } from "@/lib/format";
+import { compactNumber, formatValue, rowCountLabel } from "@/lib/format";
 
 describe("formatValue", () => {
   it("formats by unit", () => {
@@ -19,5 +19,14 @@ describe("formatValue", () => {
   it("compacts axis ticks", () => {
     expect(compactNumber(12300)).toBe("12.3K");
     expect(compactNumber(950)).toBe("950");
+  });
+});
+
+describe("rowCountLabel", () => {
+  const rows = (shown: number) => Array.from({ length: shown }, (_, i) => [i]);
+  it("says how many of the rows are shown when the UI got fewer than came back", () => {
+    expect(rowCountLabel({ rows: rows(5), row_count: 5, truncated: false })).toBe("5 rows");
+    expect(rowCountLabel({ rows: rows(50), row_count: 120, truncated: false })).toBe("Showing 50 of 120 rows");
+    expect(rowCountLabel({ rows: rows(50), row_count: 200, truncated: true })).toBe("Showing 50 of 200 rows (safety LIMIT 200)");
   });
 });

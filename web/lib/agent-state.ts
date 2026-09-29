@@ -30,17 +30,30 @@ function toolLabel(name: string, args: Record<string, unknown>): string {
   return name;
 }
 
+/** Status texts (verbatim, spec 06) after which a new run starts from scratch: the backup model, or the cache.
+ * The SQL, rows and chart of the run before it no longer belong to the answer that follows. */
+export const RESTART_STATUSES: ReadonlySet<string> = new Set([
+  "Switching to the backup model…",
+  "AI is offline, so I'm using a pre-written query on live data",
+  "That took too long, so I'm using a pre-written query on live data",
+]);
+
 function apply(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
-    case "status":
-      return { ...state, steps: [...state.steps, { kind: "status", text: event.data.text }] };
+    case "status": {
+      const steps: Step[] = [...state.steps, { kind: "status", text: event.data.text }];
+      if (RESTART_STATUSES.has(event.data.text)) return { ...state, steps, attempts: [], rows: undefined, chart: undefined };
+      return { ...state, steps };
+    }
     case "tool_call": {
       const { id, name, arguments: args } = event.data;
       return { ...state, steps: [...state.steps, { kind: "tool", id, name, label: toolLabel(name, args), state: "running" }] };
     }
     case "tool_result": {
       const { id, name, ok, summary } = event.data;
-      const steps = state.steps.map((s) => (s.kind === "tool" && s.id === id ? { ...s, state: ok ? "ok" : "failed", summary } as Step : s));
+      // A retried run (backup model) can reuse an id, so only the latest step with it is the one finishing.
+      const at = state.steps.findLastIndex((s) => s.kind === "tool" && s.id === id);
+      const steps = state.steps.map((s, i) => (i === at && s.kind === "tool" ? { ...s, state: ok ? "ok" : "failed", summary } as Step : s));
       let attempts = state.attempts;
       const last = attempts.at(-1);
       if (name === "run_query" && !ok && last && !last.failed) attempts = [...attempts.slice(0, -1), { ...last, failed: summary }];

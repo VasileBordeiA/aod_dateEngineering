@@ -35,7 +35,7 @@ export function StepTimeline({ steps, running, startedKey }: { steps: Step[]; ru
           s.kind === "status" ? (
             <li key={i} className="step-in py-1 pl-10 text-base text-muted italic">{s.text}</li>
           ) : (
-            <li key={s.id} className="step-in grid grid-cols-[1.75rem_minmax(0,1fr)] items-baseline gap-x-3 py-1">
+            <li key={i} className="step-in grid grid-cols-[1.75rem_minmax(0,1fr)] items-baseline gap-x-3 py-1">
               <span aria-label={s.state} className={`inline-flex size-7 items-center justify-center self-center rounded-full border-2 text-sm font-bold ${DOT[s.state]}`}>
                 {ICON[s.state]}
               </span>

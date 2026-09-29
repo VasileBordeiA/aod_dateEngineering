@@ -4,6 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // Playwright loads this spec as CommonJS (package.json has no "type": "module"), so __dirname, not import.meta.url.
 const FIXTURE = readFileSync(join(__dirname, "../fixtures/agent-best-tippers.sse"), "utf8");
+const ONESHOT_FIXTURE = readFileSync(join(__dirname, "../fixtures/agent-oneshot-repair.sse"), "utf8");
 const SUGGESTIONS = [
   { id: "best_tippers", question: "Which borough has the best tippers?" },
   { id: "busiest_zones_last_hour", question: "What are the 10 busiest pickup zones in the last hour?" },
@@ -30,13 +31,57 @@ test("a suggested question renders steps, both SQL attempts, table, chart and an
   const sql = page.getByTestId("sql-panel");
   await expect(sql.locator("del")).toContainText("avg(tip)");
   await expect(sql).toContainText("Unknown expression identifier");
-  await expect(sql).toContainText("attempt 2/3");
+  await expect(sql).toContainText("attempt 2");
+  await expect(sql).not.toContainText("/3");
   await expect(sql).toContainText("+ safety LIMIT 200");
 
   await expect(page.getByRole("table")).toContainText("Staten Island");
   await expect(page.locator(".recharts-surface").first()).toBeVisible();
   await expect(page.getByTestId("steps")).toContainText("describe_table(trips)");
   await expect(page.getByTestId("steps")).toContainText("Fixing its own query…");
+});
+
+test("oneshot: a failed attempt shows its error line, and the steps list the run_query steps", async ({ page }) => {
+  await mockApi(page, ONESHOT_FIXTURE);
+  await page.goto("/agent");
+  await page.getByRole("button", { name: "Which borough has the best tippers?" }).click();
+  await expect(page.getByTestId("answer")).toContainText("answered by taxi-qwen2.5-coder-14b (local) · 7.4 s");
+
+  const sql = page.getByTestId("sql-panel");
+  await expect(sql.locator("del")).toHaveCount(1);
+  await expect(sql.locator("del")).toContainText("avg(tip)");
+  await expect(sql).toContainText("✗ Code: 47. DB::Exception: Unknown expression identifier `tip`");
+  await expect(sql).toContainText("attempt 2");
+
+  const steps = page.getByTestId("steps");
+  await expect(steps).toContainText("Using the schema cheat-sheet");
+  await expect(steps.getByText("run_query", { exact: true })).toHaveCount(2);
+  await expect(steps.locator('[aria-label="failed"]')).toHaveCount(1);
+  await expect(steps).toContainText("Unknown expression identifier");
+  await expect(steps).toContainText("5 rows in 84 ms");
+  await expect(steps).toContainText("render_chart(bar)");
+});
+
+test("oneshot: when no query works, both attempts are struck through with their errors", async ({ page }) => {
+  const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const attempt = (n: number, sql: string, error: string) =>
+    frame("tool_call", { id: `oneshot_${n}`, name: "run_query", arguments: { sql, purpose: "x" } }) +
+    frame("sql", { attempt: n, sql, purpose: "x" }) +
+    frame("tool_result", { id: `oneshot_${n}`, name: "run_query", ok: false, summary: error });
+  await mockApi(page,
+    frame("status", { text: "Using the schema cheat-sheet" }) +
+    attempt(1, "SELECT * FROM system.users", "The table system.users is not allowed.") +
+    frame("status", { text: "Fixing its own query…" }) +
+    attempt(2, "SELECT * FROM system.grants", "The table system.grants is not allowed.") +
+    frame("error", { code: "NO_WORKING_QUERY", message: "I couldn't write a working query for that. Try rephrasing, or pick a suggested question!" }) +
+    frame("done", { request_id: "n", provider: "local", model: "m", mode: "oneshot", cached: false, latency_ms: 10, tool_calls: 0, invalid_tool_calls: 0, repairs: 2 }));
+  await page.goto("/agent");
+  await page.getByRole("button", { name: "Which borough has the best tippers?" }).click();
+  const sql = page.getByTestId("sql-panel");
+  await expect(sql.locator("del")).toHaveCount(2);
+  await expect(sql).toContainText("✗ The table system.users is not allowed.");
+  await expect(sql).toContainText("✗ The table system.grants is not allowed.");
+  await expect(page.getByTestId("steps").locator('[aria-label="failed"]')).toHaveCount(2);
 });
 
 test("idle reset clears the screen after 90 s and shows the attract state", async ({ page }) => {
@@ -134,5 +179,5 @@ test("events from a replaced stream never reach the new question", async ({ page
   await expect(sql).not.toContainText("A-LATE");
   await expect(page.getByTestId("answer")).not.toContainText("question A");
   await expect(page.getByTestId("answer")).toContainText("Answer for question B.");
-  await expect(sql).not.toContainText("attempt 2/3");
+  await expect(sql).not.toContainText("attempt 2");
 });

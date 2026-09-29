@@ -2,8 +2,6 @@ import { Highlight, type PrismTheme } from "prism-react-renderer";
 import type { Attempt } from "@/lib/agent-state";
 import { flowSql } from "@/lib/sql-display";
 
-const MAX_ATTEMPTS = 3; // 1 + AGENT_MAX_REPAIRS
-
 /** SQL highlighting in the pipeline purples; every token clears WCAG AA on the panel (#181b1f). */
 const THEME: PrismTheme = {
   plain: { color: "#eeedfe", backgroundColor: "transparent" },
@@ -52,11 +50,12 @@ export function SqlPanel({ attempts }: { attempts: Attempt[] }) {
       <div className="mb-3 flex shrink-0 items-center gap-3">
         <h2 className="text-lg font-semibold text-pipeline-ink">SQL</h2>
         <span className="rounded-md border border-pipeline bg-pipeline-fill px-2 text-sm text-pipeline-ink">+ safety LIMIT 200</span>
-        {current && <span className="ml-auto text-base text-muted tabular-nums">attempt {attempts.length}/{MAX_ATTEMPTS}</span>}
+        {/* Spec 06: the counter only appears once the AI has retried. No "/max": tools and oneshot allow different counts. */}
+        {current && current.attempt > 1 && <span className="ml-auto text-base text-muted tabular-nums">attempt {current.attempt}</span>}
       </div>
       {!current && <p className="text-lg text-muted">The SQL the AI writes appears here, always.</p>}
       <div className="flex max-h-[60vh] min-h-0 flex-col gap-4 overflow-y-auto lg:max-h-none">
-        {attempts.slice(0, -1).map((a) => <Failed key={a.attempt} attempt={a} />)}
+        {attempts.slice(0, -1).map((a, i) => <Failed key={i} attempt={a} />)}
         {current && (current.failed ? <Failed attempt={current} /> : (
           <div>
             {current.purpose && <p className="mb-1 text-base text-muted">{current.purpose}</p>}
