@@ -227,17 +227,17 @@ Format: context → decision → consequences → alternatives rejected. To chan
 | Model | Mode | Accuracy | Suggested | Refusals | p50 / p95 | Tool-call validity |
 |---|---|---|---|---|---|---|
 | qwen2.5-coder:14b | tools | 20% | 0% | all pass | 3.3 s / 5.7 s | 100% |
-| qwen3:14b | tools | dropped — not a full run (see below) | | | ≈38 s per call | |
+| qwen3:14b | tools | 23% (reference only: excluded from selection, see below) | 0% | all pass | 34.5 s / 45.0 s | 100% |
 | llama3.1:8b | tools | 20% | 0% | all pass | 5.1 s / 8.5 s | 100% |
 | **qwen2.5-coder:14b** | **oneshot** | **80%** | **100%** | **all pass** | **6.8 s / 12.5 s** | **100%** |
 | llama3.1:8b | oneshot | 47% | 40% | FAIL (3 refusals gave "no answer") | 4.0 s / 13.4 s | 100% |
 
-`qwen3:14b` (tools) did complete its 30-question run (`evals/reports/2026-09-29-taxi-qwen3-14b-tools.md`: 23% accuracy,
-0% suggested, p50 34.5 s / p95 45.0 s), but it is marked dropped here rather than scored on its own merits: it is a
-"thinking" model whose per-call latency routinely exceeds `LLM_TIMEOUT_S=30 s` (the api log shows most questions
-taking 30–45 s, ending in `LLM_UNAVAILABLE`/`TIMEOUT`, falling back to cached SQL for the suggested questions). That
-alone rules it out for a 2–3-minute stand visit, so the user chose to skip its oneshot run rather than spend more
-eval time confirming a foregone conclusion.
+`qwen3:14b` was dropped from the selection. Its `tools` run had already finished its 30 questions before the
+instruction to drop it arrived (`evals/reports/2026-09-29-taxi-qwen3-14b-tools.md`: 23% accuracy, 0% suggested,
+p50 34.5 s / p95 45.0 s). Those numbers are kept above for reference only; the model is excluded from the selection,
+and its `oneshot` run was never made. The reason: it is a "thinking" model whose per-call latency routinely exceeds
+`LLM_TIMEOUT_S=30 s` (the api log shows most questions taking 30–45 s, ending in `LLM_UNAVAILABLE`/`TIMEOUT` and the
+cached SQL for the suggested questions), which alone rules it out for a 2–3-minute stand visit.
 
 **Decision:** `LLM_LOCAL_MODEL=qwen2.5-coder:14b` (derived as `taxi-qwen2.5-coder-14b`, `num_ctx 16384`), `AGENT_MODE=oneshot`,
 because it is the only run that clears every spec-06 target (≥ 80% overall, 100% suggested, p95 < 15 s, all refusals

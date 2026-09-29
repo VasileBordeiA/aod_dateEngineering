@@ -77,11 +77,11 @@ backfill: ## Replay at max speed through the real pipeline: make backfill UNTIL=
 	$(COMPOSE) start replayer
 
 pause: ## Pause the replayer (sim clock freezes)
-	curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" $(CTRL)/pause && echo
+	@curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" $(CTRL)/pause && echo
 resume: ## Resume the replayer
-	curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" $(CTRL)/resume && echo
+	@curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" $(CTRL)/resume && echo
 speed: ## Change replay speed: make speed S=120
-	curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" -d '{"speed": $(S)}' $(CTRL)/speed && echo
+	@curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" -d '{"speed": $(S)}' $(CTRL)/speed && echo
 
 migrate: ## Re-apply the idempotent ClickHouse DDL
 	for f in infra/clickhouse/init/*.sql; do echo "$$f"; $(COMPOSE) exec -T clickhouse clickhouse-client --user admin --password "$(CLICKHOUSE_ADMIN_PASSWORD)" --multiquery < $$f || exit 1; done
