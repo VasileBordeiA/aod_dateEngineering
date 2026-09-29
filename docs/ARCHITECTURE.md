@@ -148,9 +148,9 @@ Pin these at **M0** (exact tags and versions, never `latest`). Record the chosen
 | Python / uv | 3.12 / 0.11.13 | 2026-09-28 |
 | quixstreams | 3.26.0 | 2026-09-28 |
 | confluent-kafka, clickhouse-connect, pyarrow, duckdb | 2.15.1, 1.9.0, 25.0.1, 1.5.5 | 2026-09-28 |
-| fastapi, openai, sqlglot | pin at M3 | |
-| Node / pnpm / Next.js | pin at M3 | |
-| Ollama + chosen model tag | 0.30.8 + TBD after eval (M3) | |
+| fastapi, uvicorn, openai, sqlglot, httpx | 0.141.1, 0.54.0, 3.19.2, 30.20.0, 0.28.1 | 2026-09-29 |
+| Node / pnpm / Next.js / React | 24.13.1 / 10.33.2 / 16.3.6 / 19.2.8 | 2026-09-29 |
+| Ollama + chosen model tag | 0.30.8 + taxi-qwen2.5-coder-14b (from qwen2.5-coder:14b, num_ctx 16384) | 2026-09-29 |
 
 ## 10. What we deliberately don't do
 - No schema registry, Avro, or Protobuf. JSON plus JSON Schema contracts is more readable on screen ([DECISIONS](DECISIONS.md) ADR-006).

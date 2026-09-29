@@ -1,9 +1,16 @@
 :80 {
+	# Agent SSE (and trace WebSockets in M4): never buffer, never compress
+	handle /api/* {
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
 	# Grafana runs with serve_from_sub_path=true, so keep the /grafana prefix
 	handle /grafana/* {
 		reverse_proxy grafana:3000
 	}
 	handle {
-		respond "NYC Taxi Live: the web UI arrives in M3. The dashboard is at /grafana/" 200
+		encode zstd gzip
+		reverse_proxy web:3000
 	}
 }

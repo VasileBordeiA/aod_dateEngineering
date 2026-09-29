@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #111217;
+  --color-panel: #181b1f;
+  --color-line: #2c2f36;
+  --color-ink: #f2f2f0;
+  --color-muted: #a3a29b;
+  --color-pipeline: #534ab7;
+  --color-pipeline-fill: #3c3489;
+  --color-pipeline-ink: #eeedfe;
+  --color-visitor: #1d9e75;
+  --color-visitor-fill: #0b4d3f;
+  --color-visitor-ink: #e1f5ee;
+  --color-amber: #fab219;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html {
+  color-scheme: dark;
+  font-size: 20px; /* kiosk base (spec 08); phone pages override to 16px */
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+/* SQL and tool names: a monospace the stand laptop already has (offline-first, no web fonts). */
+@theme {
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* New timeline steps slide in as SSE events arrive (spec 08); off for reduced motion. */
+@keyframes step-in {
+  from { opacity: 0; transform: translateY(0.25rem); }
+  to { opacity: 1; transform: none; }
+}
+.step-in { animation: step-in 180ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .step-in, .animate-pulse { animation: none; }
+}

@@ -1,0 +1,265 @@
+import pytest
+import yaml
+from conftest import GOLDEN
+
+from agent.sql_guard import MAX_SQL_CHARS, PARSE_ERROR, check_sql
+
+ATTACKS = [
+    "DROP TABLE taxi.trips",
+    "SELECT 1; DROP TABLE taxi.trips",
+    "INSERT INTO taxi.trips SELECT * FROM taxi.trips",
+    "SET readonly = 0",
+    "SELECT * FROM system.users",
+    "SELECT * FROM taxi.agent_log",
+    "WITH x AS (SELECT * FROM system.tables) SELECT * FROM x",
+    "SELECT * FROM taxi.trips UNION ALL SELECT * FROM system.users",
+    "SELECT * FROM trips WHERE trip_id IN (SELECT name FROM system.tables)",
+    "SELECT * FROM url('http://x/y', CSV)",
+    "SELECT * FROM file('/etc/passwd')",
+    "SELECT * FROM remote('localhost', system.users)",
+    "SELECT * FROM numbers(1000000000000)",
+    "SELECT sleep(3)",
+    "SELECT getSetting('readonly')",
+    "SELECT * FROM taxi.trips SETTINGS max_execution_time = 1000",
+    "SELECT * FROM taxi.trips FORMAT Native",
+    "SELECT * FROM taxi.trips INTO OUTFILE '/tmp/x'",
+    "OPTIMIZE TABLE taxi.trips FINAL",
+    "KILL QUERY WHERE 1",
+    "SYSTEM SHUTDOWN",
+    "SHOW TABLES",
+    "EXPLAIN SELECT 1",
+    # beyond the spec list
+    "DESCRIBE taxi.trips",
+    "SELECT * FROM information_schema.tables",
+    "SELECT * FROM default.trips",
+    "SELECT * FROM taxi.trips_rejected AS r JOIN system.one AS o ON 1 = 1",
+    "SELECT currentUser()",
+    "SELECT user()",
+    "SELECT dictGet('d', 'x', 1)",
+    "SELECT throwIf(1)",
+    "SELECT * FROM s3('https://bucket/x.csv')",
+    "SELECT count() FROM taxi.trips WHERE sleepEachRow(1) = 0",
+    "SELECT * FROM (SELECT * FROM taxi.trips) SETTINGS max_threads = 64",
+    "",
+    "   ;  ",
+    # fix round 1: tokenizer errors (TokenError, not a ParseError subclass) must not escape check_sql
+    "SELECT 'abc FROM trips",
+    "SELECT 1 FROM trips /* unterminated",
+    'SELECT "abc FROM trips',
+    # fix round 1: deep nesting under MAX_SQL_CHARS blows the recursion limit while parsing
+    "SELECT " + "(" * 2400 + "1" + ")" * 2400,
+    # fix round 1: CTE-name shadowing must be scope-aware, not a whole-tree name collection
+    "SELECT * FROM agent_log WHERE 1 IN (WITH agent_log AS (SELECT 1) SELECT * FROM agent_log)",
+    "SELECT * FROM agent_log, (WITH agent_log AS (SELECT 1) SELECT * FROM agent_log) AS s",
+    "SELECT * FROM agent_log UNION ALL (WITH agent_log AS (SELECT 1) SELECT * FROM agent_log)",
+    "WITH agent_log AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
+    # fix round 2: a scalar WITH (`WITH <expr> AS name`) is a ClickHouse expression alias, never a
+    # relation. Verified on the running ClickHouse: `WITH 1 AS nope SELECT * FROM nope` and
+    # `WITH (SELECT 1) AS nope SELECT * FROM nope` both raise UNKNOWN_TABLE "nope" — so
+    # `FROM agent_log` here can only ever resolve to the real, forbidden table.
+    "WITH 1 AS agent_log SELECT * FROM agent_log",
+    "WITH (SELECT 1) AS agent_log SELECT * FROM agent_log",
+    # fix round 3: CTE visibility is backward-only (inside CTE i's body, only CTEs 0..i-1 of that
+    # WITH are visible — never i itself, never a later sibling), so cycles through siblings are
+    # impossible by construction. Round 2 wrongly modelled siblings as mutually visible: verified
+    # as agent_ro that ClickHouse actually resolves an indirect self-reference like this back to
+    # the REAL table (`WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM agent_log)
+    # SELECT * FROM agent_log` returns a real taxi.agent_log row/header, not a CTE), because a
+    # non-recursive CTE can only see names declared strictly before it.
+    "WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
+    "WITH b AS (SELECT * FROM agent_log), agent_log AS (SELECT * FROM b) SELECT * FROM agent_log",
+    "WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM c), c AS (SELECT * FROM agent_log) "
+    "SELECT * FROM agent_log",
+    # A plain forward reference (no cycle) is also rejected under backward-only visibility: CTE 0's
+    # body can never see any CTE of its own WITH, so a non-whitelisted forward-referenced name can
+    # only be the real (forbidden) table or an unknown one. This is a deliberately stricter policy
+    # than ClickHouse's own resolution (which does find b here) — the model just gets a repairable
+    # error instead.
+    "WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT 1) SELECT * FROM a",
+    "WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x FROM trips) SELECT * FROM a",
+    # fix round 4: a WITH name may not reuse a whitelisted table name (any case, table or scalar
+    # CTE). Backward-only visibility alone missed this: the guard read the forward-referenced
+    # `trips`/`zones` as the real table, but ClickHouse resolved it to the later sibling CTE,
+    # closing a cycle back to the REAL agent_log (verified as agent_ro: ACCESS_DENIED on
+    # taxi.agent_log for the first query).
+    "WITH agent_log AS (SELECT * FROM trips), trips AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
+    "WITH agent_log AS (SELECT * FROM zones), zones AS (SELECT * FROM agent_log) SELECT * FROM agent_log",
+    "WITH agent_log AS (SELECT * FROM zones), b AS (SELECT 1 AS x), zones AS (SELECT * FROM agent_log) "
+    "SELECT * FROM agent_log",
+    "WITH trips AS (SELECT 1) SELECT * FROM trips",
+    "WITH 1 AS zones SELECT * FROM zones",
+    "WITH Trips AS (SELECT 1) SELECT * FROM trips",
+    "WITH `ZONES` AS (SELECT 1) SELECT * FROM taxi.zones",
+    "WITH a AS (WITH trips AS (SELECT * FROM agent_log) SELECT * FROM trips) SELECT * FROM a",
+    "SELECT * FROM trips UNION ALL (WITH zones AS (SELECT 1) SELECT * FROM zones)",
+    # fix round 4: ClickHouse matches CTE names case-sensitively (verified as agent_ro:
+    # `WITH AGENT_LOG AS (SELECT 1 AS x) SELECT * FROM agent_log` -> ACCESS_DENIED on
+    # taxi.agent_log), so the guard must too — a differently-cased CTE is not a shadow.
+    "WITH AGENT_LOG AS (SELECT 1 AS x) SELECT * FROM agent_log",
+    "WITH Agent_Log AS (SELECT 1 AS x) SELECT * FROM `agent_log`",
+    # fix round 5: each WITH name is defined at most once in the whole statement. An outer `b` and
+    # an inner `b` let ClickHouse pick the later inner sibling, close a cycle and read the real
+    # taxi.agent_log (verified as agent_ro: ACCESS_DENIED on taxi.agent_log).
+    "WITH b AS (SELECT 1 AS x) SELECT * FROM "
+    "(WITH agent_log AS (SELECT * FROM b), b AS (SELECT * FROM agent_log) SELECT * FROM agent_log)",
+    "WITH agent_log AS (SELECT 1 AS x) SELECT * FROM "
+    "(WITH a AS (SELECT * FROM agent_log), agent_log AS (SELECT * FROM a) SELECT * FROM a)",
+    "WITH b AS (SELECT 1 AS x), b AS (SELECT 2 AS x) SELECT * FROM b",
+    "WITH b AS (SELECT 1 AS x) SELECT * FROM (WITH b AS (SELECT 2 AS x) SELECT * FROM b)",
+    "WITH 1 AS b, b AS (SELECT 2 AS x) SELECT * FROM b",
+    # fix round 5: a bare name on the right of IN is a TABLE to ClickHouse (sqlglot calls it a
+    # Column). Verified as agent_ro: these reached taxi.agent_log / system.users (ACCESS_DENIED).
+    "SELECT 1 WHERE 'x' IN system.users",
+    "SELECT 1 FROM trips WHERE 1 IN agent_log",
+    "SELECT 1 FROM trips WHERE pu_zone IN taxi.agent_log",
+    "SELECT 1 FROM trips WHERE 1 IN (agent_log)",
+    "SELECT 1 FROM trips WHERE (1, 2) IN agent_log",
+    "SELECT 1 FROM trips WHERE 1 NOT IN agent_log",
+    "SELECT 1 FROM trips WHERE 1 NOT IN (agent_log)",
+    "SELECT 1 FROM trips WHERE 1 GLOBAL IN agent_log",
+    "SELECT 1 FROM trips WHERE 1 GLOBAL NOT IN taxi.agent_log",
+    "SELECT 1 FROM trips WHERE 1 GLOBAL IN (system.users)",
+    "SELECT 1 FROM trips WHERE 1 IN ((agent_log))",
+    "SELECT 1 FROM trips WHERE 1 IN `agent_log`",
+    "SELECT 1 FROM trips WHERE 1 IN taxi.`agent_log`",
+    "SELECT 1 FROM trips WHERE 1 IN system.users.name",
+    "SELECT 1 IN agent_log",
+    "SELECT * FROM trips WHERE pu_location_id IN (SELECT location_id FROM zones WHERE 1 IN agent_log)",
+    "WITH a AS (SELECT 1 AS x FROM trips WHERE 1 IN agent_log) SELECT * FROM a",
+    "WITH a AS (SELECT 1 AS x FROM trips WHERE 1 IN b), b AS (SELECT 1 AS y) SELECT * FROM a",
+    "WITH 1 AS s SELECT 1 FROM trips WHERE 1 IN s",
+    "SELECT 1 FROM trips AS t WHERE 1 IN t",
+    # fix round 5: the function spellings of IN also read a bare name as a table.
+    "SELECT notIn(1, agent_log)",
+    "SELECT globalIn(1, agent_log)",
+    "SELECT `in`(1, agent_log)",
+    "SELECT globalNotNullIn(1, agent_log)",
+    "SELECT count() FROM trips WHERE notIn(payment_type, (1, 2))",
+    # fix round 5: the whitelist is exact-case; ClickHouse is case-sensitive, so this never runs.
+    "select count() from TAXI.TRIPS",
+    "SELECT count() FROM Trips",
+    "SELECT count() FROM TAXI.trips",
+    "SELECT 1 FROM trips WHERE 1 IN ZONES",
+    # fix round 5: functions that take a table name as a string.
+    "SELECT hasColumnInTable('taxi', 'agent_log', 'question')",
+    "SELECT hasTable('taxi', 'agent_log')",
+    "SELECT hasTableOrView('system', 'users')",
+    "SELECT hasDictionary('d')",
+    "SELECT joinGet('taxi.agent_log', 'x', 1)",
+    "SELECT joinGetOrNull('taxi.agent_log', 'x', 1)",
+    "SELECT dictHas('d', 1)",
+    "SELECT dictIsIn('d', 1, 2)",
+    "SELECT getServerSetting('max_server_memory_usage')",
+    "SELECT getMergeTreeSetting('index_granularity')",
+]
+
+MUST_PASS = [
+    "WITH b AS (SELECT pu_borough, count() AS c FROM trips GROUP BY pu_borough) SELECT * FROM b ORDER BY c DESC",
+    "SELECT pu_zone, row_number() OVER (PARTITION BY pu_borough ORDER BY fare_amount DESC) AS rn FROM taxi.trips",
+    "SELECT quantile(0.95)(trip_distance) FROM taxi.trips",
+    "SELECT arrayJoin(reasons) AS r, count() FROM taxi.trips_rejected GROUP BY r",
+    "SELECT reason, count() FROM taxi.trips_rejected ARRAY JOIN reasons AS reason GROUP BY reason",
+    "SELECT toStartOfHour(pickup_ts) AS h, count() FROM trips GROUP BY h ORDER BY h",
+    "SELECT count() FROM taxi.trips WHERE pickup_ts >= (SELECT now_ts FROM taxi.sim_now) - INTERVAL 1 HOUR",
+    "SELECT countIf(is_card) / count() FROM trips",
+    "SELECT argMax(trips, emitted_at) FROM agg_borough_minute",
+    "SELECT z.zone, count() FROM trips AS t INNER JOIN zones AS z ON z.location_id = t.pu_location_id GROUP BY z.zone",
+    "SELECT stage, count() FROM trace_events GROUP BY stage",
+    "SELECT count() FROM taxi.trips;",
+    "SELECT 1 UNION ALL SELECT 2",
+    # CTE visibility is backward-only (see sql_guard._visible_cte_names): a plain backward
+    # reference — CTE b's body referencing the earlier sibling a — must pass.
+    "WITH a AS (SELECT 1 AS x FROM trips), b AS (SELECT * FROM a) SELECT * FROM b",
+    # fix round 2: a WITH attached to a UNION is visible to every branch, not just the leftmost.
+    # Verified on the running ClickHouse with a non-existent name:
+    #   WITH nope AS (SELECT 1 AS a) SELECT * FROM nope UNION ALL SELECT * FROM nope  ->  1 \n 1
+    # (both branches succeed; a lone `SELECT * FROM nope` errors UNKNOWN_TABLE, so both branches
+    # really did resolve through the CTE, not a same-named real table).
+    "WITH b AS (SELECT 1 AS x) SELECT * FROM b UNION ALL SELECT * FROM b",
+    # fix round 4: backticks don't change a name, and an inner query may still use an outer CTE.
+    "WITH `b` AS (SELECT 1 AS x FROM trips) SELECT * FROM b",
+    "WITH a AS (SELECT 1 AS x FROM trips) SELECT * FROM (WITH b AS (SELECT * FROM a) SELECT * FROM b)",
+    # fix round 5: keyword case is free (only identifiers are exact-case); IN with a visible CTE, a
+    # subquery, a value list or a tuple() is fine; different-cased WITH names are different names.
+    "select count() from taxi.trips where payment_type in (1, 2)",
+    "WITH x AS (SELECT 1 AS a) SELECT 1 FROM trips WHERE 1 IN x",
+    "WITH x AS (SELECT 1 AS a) SELECT 1 FROM trips WHERE 1 GLOBAL NOT IN (x)",
+    "WITH x AS (SELECT 1 AS a), y AS (SELECT 1 FROM trips WHERE 1 IN x) SELECT * FROM y",
+    "SELECT count() FROM trips WHERE pu_location_id IN (SELECT location_id FROM zones WHERE borough = 'Queens')",
+    "SELECT count() FROM trips WHERE payment_type IN (1, 2)",
+    "SELECT count() FROM trips WHERE payment_type NOT IN tuple(1, 2)",
+    "SELECT count() FROM trips WHERE pu_location_id IN zones",
+    "SELECT count() FROM trips WHERE pu_location_id GLOBAL IN taxi.zones",
+    "WITH b AS (SELECT 1 AS x), B AS (SELECT 2 AS x) SELECT * FROM b UNION ALL SELECT * FROM B",
+]
+
+
+def golden_sql() -> list[tuple[str, str]]:
+    out = []
+    for q in yaml.safe_load(GOLDEN.read_text())["questions"]:
+        sql = q["reference_sql"].replace("{trace_id_card}", "00000000-0000-0000-0000-000000000001")
+        out.append((q["id"], sql.replace("{trace_id_cash}", "00000000-0000-0000-0000-000000000002")))
+    return out
+
+
+@pytest.mark.parametrize("sql", ATTACKS)
+def test_attack_is_rejected(sql):
+    r = check_sql(sql)
+    assert not r.ok and r.reason and r.safe_sql == ""
+
+
+@pytest.mark.parametrize("sql", MUST_PASS)
+def test_valid_clickhouse_passes(sql):
+    r = check_sql(sql)
+    assert r.ok, r.reason
+
+
+@pytest.mark.parametrize("qid, sql", golden_sql())
+def test_every_reference_sql_passes(qid, sql):
+    assert check_sql(sql).ok, qid
+
+
+def test_safety_limit_wraps_the_original_sql():
+    r = check_sql("SELECT count() FROM taxi.trips;\n")
+    assert r.safe_sql == "SELECT * FROM (\nSELECT count() FROM taxi.trips\n) LIMIT 200"
+
+
+def test_reasons_are_friendly():
+    assert "system.users" in check_sql("SELECT * FROM system.users").reason
+    assert "one statement" in check_sql("SELECT 1; SELECT 2").reason
+    assert check_sql("SELEC count( FROM").reason == PARSE_ERROR
+    assert "SETTINGS" in check_sql("SELECT 1 FROM trips SETTINGS max_threads = 1").reason
+
+
+def test_whitelisted_cte_name_reason_names_it():
+    reason = check_sql("WITH trips AS (SELECT 1) SELECT * FROM trips").reason
+    assert "'trips'" in reason and "another name" in reason
+    assert "'zones'" in check_sql("WITH 1 AS zones SELECT * FROM zones").reason
+    assert "'Trips'" in check_sql("WITH Trips AS (SELECT 1) SELECT * FROM x").reason
+
+
+def test_round5_reasons_name_the_problem():
+    reason = check_sql("WITH b AS (SELECT 1 AS x), b AS (SELECT 2 AS x) SELECT * FROM b").reason
+    assert "'b' is defined twice" in reason
+    assert "agent_log" in check_sql("SELECT 1 FROM trips WHERE 1 IN agent_log").reason
+    assert "TAXI.TRIPS" in check_sql("select count() from TAXI.TRIPS").reason
+    assert "joinget()" in check_sql("SELECT joinGet('taxi.agent_log', 'x', 1)").reason
+
+
+def test_length_limit():
+    long_sql = "SELECT 1 FROM trips WHERE " + " OR ".join(["1 = 1"] * 2000)
+    assert len(long_sql) > MAX_SQL_CHARS
+    assert "long" in check_sql(long_sql).reason
+
+
+def test_tokenizer_and_recursion_errors_become_parse_error():
+    # TokenError (unterminated string / comment / quoted identifier) is not a ParseError subclass,
+    # but a realistic input (e.g. an unescaped apostrophe in a zone name) must still surface the
+    # friendly, repairable PARSE_ERROR rather than crash check_sql.
+    assert check_sql("SELECT 'abc FROM trips").reason == PARSE_ERROR
+    assert check_sql("SELECT 1 FROM trips /* unterminated").reason == PARSE_ERROR
+    assert check_sql('SELECT "abc FROM trips').reason == PARSE_ERROR
+    # Deep nesting under MAX_SQL_CHARS can blow the interpreter's recursion limit while parsing.
+    deep_sql = "SELECT " + "(" * 2400 + "1" + ")" * 2400
+    assert len(deep_sql) < MAX_SQL_CHARS
+    assert check_sql(deep_sql).reason == PARSE_ERROR

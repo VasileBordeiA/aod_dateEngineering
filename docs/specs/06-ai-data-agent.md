@@ -114,6 +114,29 @@ Each event has the form `event: <type>\ndata: <json>\n\n`. The order is guarante
 
 ## Behaviour
 
+### Implementation notes (M3)
+- Event order inside a tool call: `tool_call`, then `sql` (every attempt, even one the guard rejects), then `rows`
+  (on success), then `tool_result`. For `render_chart` it's `tool_call`, `chart`, `tool_result`.
+- Additive fields: `error.retry_after_s` (`RATE_LIMITED`); `done.tool_calls`, `done.invalid_tool_calls`, `done.repairs`.
+- On a deadline, a suggested question falls back to the cache with the status "That took too long, so I'm using a
+  pre-written query on live data", instead of emitting `error TIMEOUT` first.
+- An empty reply with no tool calls counts as a provider failure. A text reply with no tool calls is an answer;
+  refusals are text replies.
+- `refused` in `agent_log` means an answer without any SQL attempt.
+- `POST /api/admin/llm/order {"order": []}` switches to cached answers only (`make llm ORDER=`).
+- New env keys: `AGENT_MAX_QUEUE`, `AGENT_GOLDEN_PATH`, `LLM_HEALTH_INTERVAL_S`.
+- `GET /api/llm/status` returns an object `{providers, order, active, mode}`, where `active` is one of
+  `"local" | "internal" | "cache"`.
+- Model selection (ADR-018): `qwen2.5-coder:14b` and `llama3.1:8b` in `tools` mode never emit a real OpenAI-style
+  tool call for `run_query` — they write it as JSON text in the message content instead (`tool_calls: 0` in every
+  failure). `qwen3:14b` is a "thinking" model whose per-call latency routinely exceeds `LLM_TIMEOUT_S`. `oneshot`
+  mode (schema in the prompt, `response_format={"type":"json_object"}`, no tool-calling round trip) is what actually
+  works with these local models; the chosen combination is `qwen2.5-coder:14b` + `oneshot`.
+- Oneshot wraps each of its own `run_query` and `render_chart` steps in `tool_call` / `tool_result`, in the same
+  order as tools mode, with ids `oneshot_1`, `oneshot_2`, …. So the UI shows the same steps, and a failed attempt
+  gets its error line. These are the api's steps, not the model's: `done.tool_calls` and `agent_log.tool_calls` stay
+  0 in oneshot, and `refused` still comes from the SQL attempts.
+
 ### Tools (OpenAI function-calling format)
 ```json
 [
@@ -196,13 +219,16 @@ emit done
 - Tool arguments that aren't valid JSON count as one failed step. Two in a row triggers failover to the next provider, and the loop restarts with a `status` "Switching to the backup model…".
 - The overall deadline is `AGENT_TOTAL_TIMEOUT_S`. If it passes, emit `error TIMEOUT`, then fall back to the cache if the question is a suggested one.
 
-### Oneshot mode (`AGENT_MODE=oneshot`, a fallback for weak tool-callers)
+### Oneshot mode (`AGENT_MODE=oneshot`, the stand's mode per ADR-018)
+Designed as the fallback for weak tool-callers, oneshot is what the stand runs: ADR-018 picked `qwen2.5-coder:14b`
+in this mode, because none of the local models emits real tool calls in `tools` mode.
+
 1. The system prompt embeds the curated schema (table and column comments for `trips`, `trips_rejected`, `agg_borough_minute`, `zones`, `sim_now`) and 3 few-shot examples.
 2. Call 1 uses `response_format={"type":"json_object"}` and returns `{"sql", "purpose", "chart": {…}}`.
 3. The SQL is guarded and executed. On error, one repair call is made with the error message.
 4. Call 2 asks for "Answer in ≤ 3 sentences given these rows" and returns the text.
 
-The UI shows the same events. The first `status` reads "Using the schema cheat-sheet" (honest: no tool calls happened).
+The UI shows the same events. The first `status` reads "Using the schema cheat-sheet" (honest: the model made no tool calls).
 
 ### SQL guard (`services/api/src/agent/sql_guard.py`, pure, TDD)
 This is defence in depth. **The database user is the real wall. The guard gives fast, friendly errors and stops obvious abuse.**

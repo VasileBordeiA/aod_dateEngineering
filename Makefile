@@ -46,6 +46,9 @@ test: ## Unit + contract tests (no Docker needed)
 	uv run pytest -q
 	cd services/replayer && uv run pytest -q
 	cd services/processor && uv run pytest -q
+	cd services/api && uv run pytest -q
+	cd web && pnpm test
+	cd web && pnpm test:e2e  # Playwright against a mocked api (spec 10), no stack needed
 
 test-integration: ## testcontainers integration tests (needs Docker running)
 	cd services/replayer && uv run pytest -q -m integration
@@ -58,6 +61,8 @@ lint: ## ruff + mypy
 	uv run ruff check scripts contracts infra
 	cd services/replayer && uv run ruff check src tests && uv run mypy src
 	cd services/processor && uv run ruff check src tests && uv run mypy src
+	cd services/api && uv run ruff check src tests && uv run mypy src
+	cd web && pnpm lint && pnpm typecheck
 
 smoke: ## M1 exit check: rows flowing, rejects with reasons, freshness
 	uv run python scripts/smoke_pipeline.py
@@ -72,11 +77,11 @@ backfill: ## Replay at max speed through the real pipeline: make backfill UNTIL=
 	$(COMPOSE) start replayer
 
 pause: ## Pause the replayer (sim clock freezes)
-	curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" $(CTRL)/pause && echo
+	@curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" $(CTRL)/pause && echo
 resume: ## Resume the replayer
-	curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" $(CTRL)/resume && echo
+	@curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" $(CTRL)/resume && echo
 speed: ## Change replay speed: make speed S=120
-	curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" -d '{"speed": $(S)}' $(CTRL)/speed && echo
+	@curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" -d '{"speed": $(S)}' $(CTRL)/speed && echo
 
 migrate: ## Re-apply the idempotent ClickHouse DDL
 	for f in infra/clickhouse/init/*.sql; do echo "$$f"; $(COMPOSE) exec -T clickhouse clickhouse-client --user admin --password "$(CLICKHOUSE_ADMIN_PASSWORD)" --multiquery < $$f || exit 1; done
@@ -89,4 +94,19 @@ docs-check: ## Diagrams in sync + all Mermaid renders + contracts valid
 	bash scripts/check_mermaid.sh
 	uv run pytest -q contracts/tests
 
-.PHONY: help secrets data up down reset status logs images test test-integration test-stack lint smoke backfill pause resume speed migrate diagrams-sync docs-check
+eval: ## Golden-set eval on the running api: make eval MODEL=taxi-qwen2.5-coder-14b [MODE=tools|oneshot] [PROVIDER=local] [ONLY=id,id]
+	LLM_LOCAL_MODEL="$(or $(MODEL),$(LLM_LOCAL_MODEL))" AGENT_MODE="$(or $(MODE),$(AGENT_MODE))" \
+	  LLM_ORDER="$(or $(PROVIDER),$(LLM_ORDER))" $(COMPOSE) up -d --wait api
+	uv run python scripts/eval_agent.py --model "$(or $(MODEL),$(LLM_LOCAL_MODEL))" \
+	  --mode "$(or $(MODE),$(AGENT_MODE))" --provider "$(or $(PROVIDER),$(LLM_ORDER))" $(if $(ONLY),--only $(ONLY))
+	@echo "api still runs the eval settings; 'make up' restores .env"
+
+llm: ## Switch the LLM provider order live: make llm ORDER=internal,local (ORDER= means cached answers only)
+	@curl -fsS -X POST -H "X-Admin-Token: $(ADMIN_TOKEN)" -H 'Content-Type: application/json' \
+	  -d "$$(python3 -c 'import json,sys; print(json.dumps({"order": [n for n in sys.argv[1].split(",") if n]}))' '$(ORDER)')" \
+	  http://127.0.0.1:8000/api/admin/llm/order && echo
+
+ollama-model: ## Derive a stand model with a 16 k context: make ollama-model BASE=qwen2.5-coder:14b
+	@bash scripts/ollama_model.sh "$(BASE)"
+
+.PHONY: help secrets data up down reset status logs images test test-integration test-stack lint smoke backfill pause resume speed migrate diagrams-sync docs-check eval llm ollama-model

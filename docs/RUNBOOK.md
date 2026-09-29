@@ -24,7 +24,8 @@ Everything the operator types is a `make` target. **Don't improvise commands at 
 ```bash
 git pull
 make images                          # build + pull every image (no internet needed tomorrow)
-ollama pull <chosen model>           # and `ollama create taxi-agent -f Modelfile` if using num_ctx route
+ollama pull qwen2.5-coder:14b
+make ollama-model BASE=qwen2.5-coder:14b   # creates taxi-qwen2.5-coder-14b (num_ctx 16384), once per laptop
 make data                            # no-op if already prepared
 make up
 make backfill UNTIL=2025-10-14T07:00:00   # ~7 sim days of history (measured M1: 2 sim days = 283k rows in 23 s incl. processor drain → expect ~1.5 min)
