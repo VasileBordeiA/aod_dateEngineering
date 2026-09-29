@@ -149,7 +149,7 @@ Pin these at **M0** (exact tags and versions, never `latest`). Record the chosen
 | quixstreams | 3.26.0 | 2026-09-28 |
 | confluent-kafka, clickhouse-connect, pyarrow, duckdb | 2.15.1, 1.9.0, 25.0.1, 1.5.5 | 2026-09-28 |
 | fastapi, uvicorn, openai, sqlglot, httpx | 0.141.1, 0.54.0, 3.19.2, 30.20.0, 0.28.1 | 2026-09-29 |
-| Node / pnpm / Next.js / React | 24.13.1 / 10.33.2 / 16.3.6 / 19.3.0 | 2026-09-29 |
+| Node / pnpm / Next.js / React | 24.13.1 / 10.33.2 / 16.3.6 / 19.2.8 | 2026-09-29 |
 | Ollama + chosen model tag | 0.30.8 + taxi-qwen2.5-coder-14b (from qwen2.5-coder:14b, num_ctx 16384) | 2026-09-29 |
 
 ## 10. What we deliberately don't do
