@@ -48,7 +48,8 @@ async def chat(llm: LLM, messages: list[dict[str, Any]], *, temperature: float, 
         kwargs["response_format"] = response_format
     try:
         response = cast(ChatCompletion, await llm.client.chat.completions.create(**kwargs))
-    except OpenAIError as exc:  # connection, timeout, 4xx/5xx incl. 429, malformed response
+    except (OpenAIError, ValueError) as exc:  # connection, timeout, 4xx/5xx incl. 429, or a body that
+        # isn't valid JSON despite an application/json content-type (json.JSONDecodeError is a ValueError)
         raise ProviderFailed(f"{type(exc).__name__}: {str(exc)[:200]}") from exc
     if not response.choices:
         raise ProviderFailed("the response had no choices")
@@ -77,8 +78,13 @@ async def run_tools(llm: LLM, messages: list[dict[str, Any]], toolbox: Toolbox, 
                 raise ProviderFailed("an empty reply with no tool calls")
             result.answer = answer
             return result
-        # Our TOOL_DEFS only declare function-type tools, so every call the model makes is one too.
-        calls = [cast(ChatCompletionMessageFunctionToolCall, call) for call in raw_calls]
+        # Our TOOL_DEFS only declare function-type tools; a compliant model never returns any other kind,
+        # but a provider that also supports "custom" tools (spec: any provider problem fails over) might.
+        calls: list[ChatCompletionMessageFunctionToolCall] = []
+        for raw_call in raw_calls:
+            if not isinstance(raw_call, ChatCompletionMessageFunctionToolCall):
+                raise ProviderFailed("the model returned a non-function tool call")
+            calls.append(raw_call)
         ids = [call.id or f"call_{result.tool_calls + i}" for i, call in enumerate(calls)]
         messages.append({"role": "assistant", "content": message.content or "", "tool_calls": [
             {"id": call_id, "type": "function",

@@ -2,7 +2,7 @@ import json
 
 import pytest
 from conftest import FakeDb
-from fake_llm import FakeLLM, http, say, slow, tool, tools
+from fake_llm import FakeLLM, http, raw, say, slow, tool, tools
 
 from agent.catalog import Catalog
 from agent.loop import FORCED_ANSWER_PROMPT, NO_WORKING_QUERY, ProviderFailed, clean_answer, run_tools
@@ -109,6 +109,23 @@ async def test_http_errors_are_provider_failures(status):
 async def test_timeout_is_a_provider_failure():
     with pytest.raises(ProviderFailed):
         await run([slow(1.0, say("late"))], timeout=0.2)
+
+
+async def test_non_function_tool_call_fails_over():
+    custom_call_body = json.dumps({
+        "id": "chatcmpl-fake", "object": "chat.completion", "created": 0, "model": "fake",
+        "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
+            "role": "assistant", "content": None,
+            "tool_calls": [{"id": "call_1", "type": "custom", "custom": {"name": "foo", "input": "bar"}}]}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    })
+    with pytest.raises(ProviderFailed, match="non-function"):
+        await run([raw(custom_call_body)])
+
+
+async def test_invalid_json_body_is_a_provider_failure():
+    with pytest.raises(ProviderFailed):
+        await run([raw("this is not json")])
 
 
 async def test_iteration_cap_forces_an_answer():

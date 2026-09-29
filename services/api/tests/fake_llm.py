@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 
@@ -31,6 +31,11 @@ def http(status: int) -> dict[str, Any]:
 
 def slow(seconds: float, step: dict[str, Any]) -> dict[str, Any]:
     return {**step, "delay": seconds}
+
+
+def raw(body: str, status: int = 200) -> dict[str, Any]:
+    """Return this exact body verbatim, with an `application/json` content-type. For malformed-body tests."""
+    return {"raw_body": body, "status": status}
 
 
 class _TimeoutTransport(httpx.AsyncBaseTransport):
@@ -63,11 +68,14 @@ class FakeLLM:
             )
 
         @self.app.post("/v1/chat/completions")
-        async def chat(request: Request) -> JSONResponse:
+        async def chat(request: Request) -> Response:
             self.requests.append(await request.json())
             step = self.script.pop(0) if self.script else say("Out of script.")
             if step.get("delay"):
                 await asyncio.sleep(step["delay"])
+            if "raw_body" in step:
+                return Response(content=step["raw_body"], status_code=step.get("status", 200),
+                                 media_type="application/json")
             if "status" in step:
                 return JSONResponse({"error": {"message": f"scripted {step['status']}"}}, status_code=step["status"])
             calls = [
