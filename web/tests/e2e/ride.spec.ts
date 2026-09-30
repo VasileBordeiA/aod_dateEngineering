@@ -1,6 +1,6 @@
 import { gzipSync } from "node:zlib";
 import { expect, test, type Page } from "@playwright/test";
-import { CREATED, mockRideApi, mockTraceSocket, send, TID } from "./ride-mocks";
+import { CREATED, ESTIMATE, mockRideApi, mockTraceSocket, send, TID } from "./ride-mocks";
 
 async function pick(page: Page, trigger: string, search: string | null, zone: string) {
   await page.getByRole("button", { name: trigger }).click();
@@ -51,6 +51,35 @@ test("a rate-limited booking shows the api's message and stays on /ride", async 
   await page.getByRole("button", { name: "Book ride" }).click();
   await expect(page.getByTestId("ride-error")).toHaveText("You've booked 3 rides this minute. Try again in 20 s.");
   await expect(page).toHaveURL(/\/ride$/);
+});
+
+test("a % tip waits for the estimate; if the estimate fails, booking sends a $0 tip", async ({ page }) => {
+  const posted = await mockRideApi(page);
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  await page.route("**/api/rides/estimate**", async (r) => {
+    calls += 1;
+    if (calls === 1) { await held; return r.fulfill({ json: ESTIMATE }); } // slow, then fine
+    return r.fulfill({ status: 503, json: { detail: "The zone list is still loading, try again in a moment" } });
+  });
+  await mockTraceSocket(page, (ws) => send(ws, { type: "history", checkpoints: [], sim_ts: null }));
+  await page.goto("/ride");
+  await pick(page, "Pickup zone", null, "Times Sq/Theatre District");
+  await pick(page, "Drop-off zone", "jfk", "JFK Airport");
+  const book = page.locator("button[type=submit]");
+  await expect(book).toHaveText("Estimating…");
+  await expect(book).toBeDisabled(); // the default 15 % tip would otherwise be sent as $0
+  release();
+  await expect(book).toHaveText("Book ride");
+  await expect(book).toBeEnabled();
+  await expect(page.getByTestId("tip-amount")).toHaveText("$2.93");
+  await pick(page, "Drop-off zone", "astoria", "Astoria"); // this pair's estimate fails
+  await expect(book).toBeEnabled();
+  await expect(page.getByTestId("tip-amount")).toHaveText("$0");
+  await book.click();
+  await expect(page).toHaveURL(new RegExp(`/trace/${TID}$`));
+  expect(posted[0]).toMatchObject({ dropoff_location_id: 7, payment: "card", tip_amount: 0 });
 });
 
 test("Book ride waits for both zones", async ({ page }) => {

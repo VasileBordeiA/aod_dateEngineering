@@ -19,6 +19,7 @@ export function RideForm() {
   const [dropoff, setDropoff] = useState<Zone | null>(null);
   // The estimate remembers which zone pair it is for, so changing a zone never shows the old pair's estimate.
   const [estimated, setEstimated] = useState<{ key: string; estimate: RideEstimate } | null>(null);
+  const [failedKey, setFailedKey] = useState<string | null>(null); // the zone pair whose estimate request failed
   const [payment, setPayment] = useState<"card" | "cash">("card");
   const [tip, setTip] = useState<TipChoice>({ kind: "pct", pct: 15 });
   const [passengers, setPassengers] = useState(1);
@@ -41,14 +42,18 @@ export function RideForm() {
     let alive = true;
     getEstimate(pickup.location_id, dropoff.location_id)
       .then((e) => { if (alive) setEstimated({ key, estimate: e }); })
-      .catch(() => undefined); // the api estimates again on booking, so this is only a preview
+      .catch(() => { if (alive) setFailedKey(key); }); // the api estimates again on booking: only the % tip needs it
     return () => { alive = false; };
   }, [pickup, dropoff]);
 
   const estimate = estimated && estimated.key === pairKey(pickup, dropoff) ? estimated.estimate : null;
   const fare = estimate?.fare_amount ?? null;
+  const estimateFailed = failedKey !== null && failedKey === pairKey(pickup, dropoff);
+  // A % tip needs the fare: booking before the estimate arrives would silently send $0. If the estimate failed,
+  // booking is allowed and the tip line shows the $0 that will be sent.
+  const waitingForFare = !!pickup && !!dropoff && tip.kind === "pct" && fare === null && !estimateFailed;
   const book = async () => {
-    if (!pickup || !dropoff || busy) return;
+    if (!pickup || !dropoff || busy || waitingForFare) return;
     setBusy(true);
     setError(null);
     const result = await bookRide({ pickup_location_id: pickup.location_id, dropoff_location_id: dropoff.location_id,
@@ -72,7 +77,7 @@ export function RideForm() {
       )}
       <ZonePicker label="Pickup zone" zones={zones} value={pickup} onChange={setPickup} />
       <ZonePicker label="Drop-off zone" zones={zones} value={dropoff} onChange={setDropoff} />
-      <EstimateCard ready={!!pickup && !!dropoff} estimate={estimate} />
+      <EstimateCard ready={!!pickup && !!dropoff} estimate={estimate} failed={estimateFailed} />
       <fieldset className="flex flex-col gap-2">
         <legend className="pb-2 font-medium">Payment</legend>
         <div className="flex gap-2">
@@ -84,9 +89,9 @@ export function RideForm() {
       <TipChips value={tip} onChange={setTip} fare={fare} />
       <PassengerStepper value={passengers} onChange={setPassengers} />
       {error && <p data-testid="ride-error" role="alert" className="rounded-xl bg-[#4a3300] px-4 py-3 text-[#ffe7b0]">{error}</p>}
-      <button type="submit" disabled={!pickup || !dropoff || busy}
+      <button type="submit" disabled={!pickup || !dropoff || busy || waitingForFare}
         className="min-h-14 rounded-xl bg-visitor text-xl font-semibold text-black disabled:opacity-40">
-        {busy ? "Booking…" : "Book ride"}
+        {busy ? "Booking…" : waitingForFare ? "Estimating…" : "Book ride"}
       </button>
     </form>
   );
