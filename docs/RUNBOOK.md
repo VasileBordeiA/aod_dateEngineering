@@ -68,7 +68,7 @@ make down                            # volumes keep everything
 7. **The real-IP check**, once, before opening:
    1. From phone A on the stand Wi-Fi, book 4 rides within a minute. The 4th must say "You've booked 3 rides this minute…".
    2. Right away, book one from phone B. It must succeed.
-   3. If phone B is also refused, Docker Desktop is hiding the phones' real IPs (they all share one address behind NAT). Set `RIDES_RATE_LIMIT_PER_MIN=30` and `AGENT_RATE_LIMIT_PER_MIN=60` in `.env` and run `make up`, so only the global caps apply instead of the (now-meaningless) per-IP one. Record which case happened, in the packing/setup notes for the day.
+   3. If phone B is also refused, Docker Desktop is hiding the phones' real IPs (they all share one address behind NAT). Set `RIDES_RATE_LIMIT_PER_MIN=1000`, `AGENT_RATE_LIMIT_PER_MIN=1000` and `TRACE_READ_RATE_LIMIT_PER_MIN=10000` in `.env` and run `make up`. These are far above the global caps on purpose: every phone now shares one address, so a per-IP limit would throttle the whole room at once, and only the global caps (30 rides/min, the agent's concurrency and queue, the ClickHouse quotas) should apply. Record which case happened, in the packing/setup notes for the day.
 
 ### What `make preflight` checks (all must be ✅)
 | Check | Pass condition |

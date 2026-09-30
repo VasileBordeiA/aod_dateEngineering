@@ -113,10 +113,12 @@ Response `201`:
 ```
 `notes` contains "NYC taxi data doesn't record cash tips, so your tip will show as $0" when `payment = "cash"`.
 
-Errors: `429` for the rate limit (`RIDES_RATE_LIMIT_PER_MIN` per IP, plus a global 30/min: "The dispatcher is busy, try again in a few seconds"). `503` if the broker doesn't acknowledge within 2 s.
+Errors: `429` for the rate limit (`RIDES_RATE_LIMIT_PER_MIN` per IP, plus a global 30/min: "The dispatcher is busy, try again in a few seconds"). `503` if the broker doesn't acknowledge within 2 s, and `503` "The zone list is still loading, try again in a moment" if the zone list isn't cached yet and ClickHouse refuses the query.
+
+**Public reads.** `GET /api/rides/estimate`, `GET /api/trace/{id}` and each `WS /api/trace/{id}` or `/api/trace/live` connect share one per-IP token bucket of `TRACE_READ_RATE_LIMIT_PER_MIN` (default 120), because they use the same `trace_ro` quota as the queryable poller. Over the limit, a GET gets `429` `{"detail": "Too many requests, try again in a few seconds", "retry_after_s": n}` with a `Retry-After` header, and a WebSocket is accepted and then closed with code `1013` (the web client reconnects with its back-off).
 
 ## Config
-`RIDES_RATE_LIMIT_PER_MIN`, `RIDES_GLOBAL_PER_MIN`, `TRACE_HISTORY_TTL_S`, `TRACE_QUERYABLE_POLL_MS`, `KAFKA_BROKERS`, `CLICKHOUSE_AGENT_*`, `CLICKHOUSE_TRACE_USER`, `CLICKHOUSE_TRACE_PASSWORD`, `STAND_PUBLIC_URL`.
+`RIDES_RATE_LIMIT_PER_MIN`, `RIDES_GLOBAL_PER_MIN`, `TRACE_READ_RATE_LIMIT_PER_MIN`, `TRACE_HISTORY_TTL_S`, `TRACE_QUERYABLE_POLL_MS`, `KAFKA_BROKERS`, `CLICKHOUSE_AGENT_*`, `CLICKHOUSE_TRACE_USER`, `CLICKHOUSE_TRACE_PASSWORD`, `STAND_PUBLIC_URL`.
 
 ## Behaviour
 
@@ -169,12 +171,14 @@ The state machine is in [DIAGRAMS §5](../DIAGRAMS.md#5-trace-checkpoint-stages-
 - **Consumer.** A background consumer of `trace.checkpoints` and `sim.clock`.
   - Group id `api-relay-<random>` with `auto.offset.reset=latest` and no commits: every api instance sees everything from "now".
   - It runs in a thread and hands messages to the asyncio loop.
+  - The thread never dies on an error: any exception is logged as `trace_relay_error` and the consumer is rebuilt after 2 s. A consumer error message (broker down) is logged at most once every 30 s. `/api/healthz` reports `trace_relay` and `kafka_out` (the producer's delivery thread) as alive or not.
 - **Ordering.** Checkpoints of one trace can arrive out of order on the topic. `stored` is produced by a second producer right after the INSERT, while the processor's other checkpoints are flushed at the Quix commit. The relay and UI therefore **order by `seq`**, never by arrival, and compute latency from `at`.
 - **History.** An in-memory dict `trace_id → {stage: checkpoint}` with a TTL of `TRACE_HISTORY_TTL_S` and max 20 k traces (LRU).
   - `GET /api/trace/{id}` and every WS connect **always** merge memory with `SELECT … FROM taxi.trace_events WHERE trace_id = {id:UUID} ORDER BY seq, at`, not memory alone: after an api restart memory only has what arrived since, so the merge is what makes a reload or reconnect show full history.
   - Merge and dedup by `stage` (the first copy of a stage wins): the api both publishes `submitted`/`ingested` straight to the hub and produces them to Kafka, which its own relay also consumes, so the same stage can otherwise arrive at a client twice.
   - If the merged checkpoints include `stored` but no terminal stage (`queryable`/`rejected`) — the api restarted between `stored` and `queryable` — the queryable detector is re-armed for that trace, so the viewer still reaches the end instead of hanging.
 - **`WS /api/trace/{id}`.** On connect, send `{"type": "history", "checkpoints": [...], "sim_ts": "..."}`. Then send `{"type": "checkpoint", "trace_id": ..., "trip_id": ..., "source": ..., "stage": ..., "seq": ..., "service": ..., "at": ..., "detail": {...}}` for each new one. Close after 10 min, or 60 s after a terminal stage (`queryable` or `rejected`).
+  - **Catch-up.** If no new checkpoint arrives for 5 s and the trace isn't terminal, re-read the history and send every stage this client hasn't seen as a `checkpoint` frame: the relay may have missed some while it (re)joined. A newly found `stored` re-arms the queryable detector. Each refresh that finds nothing doubles the wait (up to 60 s), and the close deadlines above still apply.
 - **`WS /api/trace/live`.** On connect, send `{"type": "snapshot", "traces": [{"trace_id": ..., "checkpoints": [...]}, ...], "sim_ts": "..."}` for the last 20 student traces. Then stream:
   - `{"type": "checkpoint", ...checkpoint, "ambient": true|false}` for every checkpoint (`ambient: true` when `source != "student"` — i.e. the replay-sampled ones — so the wall always has some movement even with no visitors);
   - `{"type": "clock", "sim_ts": "..."}` once a second;
@@ -190,7 +194,7 @@ When `queryable` arrives, the viewer shows the button **"Where does my ride rank
 ## Failure modes
 | Failure | Behaviour |
 |---|---|
-| Broker down | `503` "The pipeline is catching its breath, try again in a moment". No `submitted` is left dangling: if `trips.raw` fails, emit nothing further. The UI shows the error |
+| Broker down | `503` "The pipeline is catching its breath, try again in a moment". No `submitted` is left dangling: if `trips.raw` fails, emit nothing further. The UI shows the error. The producer gives up after 1 s (`message.timeout.ms`), well before the api's 2.5 s wait, so a 503 ride is not retried later. librdkafka's "possibly persisted" case means a ride that timed out locally may still land; the effect is a harmless extra student trip with no checkpoints |
 | Processor down | The trace stops at `ingested`, and the viewer shows "waiting for the stream processor…" with a spinner. It resumes automatically when the processor recovers (the offset is still there) |
 | api restarted mid-trace | The viewer reconnects (exponential backoff) and gets history from ClickHouse |
 | ClickHouse slow | `queryable` arrives late. The viewer shows the elapsed time. Nothing breaks |

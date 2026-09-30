@@ -76,7 +76,7 @@ All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form
 3. **Payment**: a Card/Cash toggle. Picking cash shows the info line "Cash tips aren't recorded in NYC taxi data".
 4. **Tip**: chips for $0, 15%, 20%, 25%, and Custom. Custom allows up to $999, and there's no warning about absurd values. The processor will reject them, and that's the lesson.
 5. **Passengers**: 1–6 stepper, default 1.
-6. **Book ride** (big button) posts, then navigates to `/trace/[id]`. The last `trace_id` is saved in `localStorage` (inside try/catch) so reopening shows "Continue watching your ride".
+6. **Book ride** (big button) posts, then navigates to `/trace/[id]`. While a % tip is chosen and the estimate hasn't arrived, the button says "Estimating…" and is disabled, so the tip is never silently sent as $0. If the estimate request fails, booking is allowed and the tip line shows the $0 that will be sent. The last `trace_id` is saved in `localStorage` (inside try/catch) so reopening shows "Continue watching your ride".
 
 There's no name field and no free text anywhere.
 
