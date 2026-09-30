@@ -3,7 +3,7 @@
 ## Purpose
 A student scans a QR code, books a fake taxi ride (pickup zone, dropoff zone, tip), and watches **their** ride move through every pipeline stage, with the latency of each hop. At the end they ask the agent "Where does my ride rank for tips today?"
 
-It makes the abstract pipeline personal. It's optional: the core demo works without it (cut line 5).
+It makes the abstract pipeline personal. It's optional: the core demo works without it (cut line 4).
 
 ## Responsibilities
 - The rides API: validation, fare estimation, a sim-clock timestamp, producing to `trips.raw`, and the `submitted`/`ingested` checkpoints.
