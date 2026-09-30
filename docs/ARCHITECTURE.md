@@ -120,6 +120,7 @@ Disk: roughly 1 GB for raw and prepared data, and under 3 GB of ClickHouse data 
 - **ClickHouse users** (spec 04):
   - `ingest_writer`: INSERT only, used by the processor and the api `agent_log` writer.
   - `agent_ro`: SELECT on whitelisted tables, `readonly=1`, hard limits, quota.
+  - `trace_ro` (ADR-019): the api's own reads only (ride estimates, the queryable poll, trace history, wall stats) — read-only, same whitelist and limits as `agent_ro`, but its own quota, so parameterised polling during a burst never eats into the agent's budget.
   - `grafana_ro`: SELECT on the dashboard tables only (no `agent_log`, no `system.*`), because anonymous viewers can send arbitrary SQL through Grafana.
   - `grafana_ops`: adds `agent_log`, `system.parts` and `system.query_log`. It's used only by `grafana-ops`, which isn't on the LAN (ADR-017).
   - `default`: disabled for network access.
@@ -149,7 +150,11 @@ Pin these at **M0** (exact tags and versions, never `latest`). Record the chosen
 | quixstreams | 3.26.0 | 2026-09-28 |
 | confluent-kafka, clickhouse-connect, pyarrow, duckdb | 2.15.1, 1.9.0, 25.0.1, 1.5.5 | 2026-09-28 |
 | fastapi, uvicorn, openai, sqlglot, httpx | 0.141.1, 0.54.0, 3.19.2, 30.20.0, 0.28.1 | 2026-09-29 |
+| `websockets` (api dependency + root dev group; test-only, testcontainers/local WS test clients) | 15.0.1 | 2026-09-29 |
 | Node / pnpm / Next.js / React | 24.13.1 / 10.33.2 / 16.3.6 / 19.2.8 | 2026-09-29 |
+| `json-schema-to-typescript` (contract → TS types, `pnpm gen:types`) | 15.0.4 (16.0.0 exists but wasn't used) | 2026-09-29 |
+| `qrcode.react` (`/qr`) | 4.2.0 | 2026-09-29 |
+| `/ride` first-load JS (Playwright-measured, gzipped) | 138.4 kB (budget ≤ 150 kB, spec 08 acceptance 4) | 2026-09-29 |
 | Ollama + chosen model tag | 0.30.8 + taxi-qwen2.5-coder-14b (from qwen2.5-coder:14b, num_ctx 16384) | 2026-09-29 |
 
 ## 10. What we deliberately don't do

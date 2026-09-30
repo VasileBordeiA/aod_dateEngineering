@@ -97,15 +97,20 @@ Run the core (replayer, processor, ClickHouse, Grafana, agent) for **2 h unatten
 - **No-go:** skip M4 entirely. Spend D10–D12 on stability, then continue with M5. The stand works without the trace feature.
 
 ### M4: Trace your ride (D10–D12)
-- [ ] **B** `POST /api/rides` (validation, fare estimator TDD, sim-clock timestamp), `submitted`/`ingested` checkpoints (spec 07).
-- [ ] **A** Processor checkpoints: `validated`, `rejected`, `enriched`, `aggregated`, and `stored` (from the sink) (spec 03 §Trace).
-- [ ] **A** `trace_events` Kafka engine + MV (spec 04). The replayer's 0.1% sampling.
-- [ ] **B** Trace relay: a consumer of `trace.checkpoints`, in-memory history, `WS /api/trace/{id}` and `WS /api/trace/live`, and the `queryable` poller.
-- [ ] **C** `/ride` (mobile-first), `/trace/[id]` animation, `/trace/live` wall, `/qr` page (spec 08).
-- [ ] **B** "Rank my ride" hand-off: `/agent?trace_id=…` with ride context in the prompt.
-- [ ] **C** Grafana panels: pipeline latency p50/p95 per stage, student rides today.
+- [x] **B** `POST /api/rides` (validation, fare estimator TDD, sim-clock timestamp), `submitted`/`ingested` checkpoints (spec 07).
+- [x] **A** Processor checkpoints: `validated`, `rejected`, `enriched`, `aggregated`, and `stored` (from the sink) (spec 03 §Trace).
+- [x] **A** `trace_events` Kafka engine + MV (spec 04). The replayer's 0.1% sampling.
+- [x] **B** Trace relay: a consumer of `trace.checkpoints`, in-memory history, `WS /api/trace/{id}` and `WS /api/trace/live`, and the `queryable` poller.
+- [x] **C** `/ride` (mobile-first), `/trace/[id]` animation, `/trace/live` wall, `/qr` page (spec 08).
+- [x] **B** "Rank my ride" hand-off: `/agent?trace_id=…` with ride context in the prompt.
+- [x] **C** Grafana panels: pipeline latency p50/p95 per stage, student rides today.
+
+**Note (M4):** the processor checkpoints (`validated`/`rejected`/`enriched`/`aggregated`/`stored`), the `trace_events` Kafka engine + MV, the replayer's 0.1% trace sampling, and the two Grafana panels (pipeline latency p50/p95, rides created by visitors) already existed from M1/M2; this milestone added the rides API, `submitted`/`ingested` checkpoints, `trace_ro` (ADR-019), the WS/GET trace relay, the queryable poller, the web pages, the rank-my-ride hand-off, and the two Stand Health visitor-ride panels.
+
+**Eval re-run pending (merge gate):** the M3 eval (ADR-018) scored 30 questions; `ride_rank`/`ride_rank_cash` are now scored too (Task 10, oneshot, taxi-qwen2.5-coder-14b): 71.9% overall (32 scored), suggested 4/5 (`best_tippers` failed), p95 17.6 s. Both ride questions failed on answer content. `make eval` must be re-run and a green (or explicitly accepted) result recorded before this branch merges.
 
 **Exit:** a phone on the stand router books a ride and sees all 7 stages in < 5 s. An absurd tip shows `rejected`. The burst test (50 rides in 10 s) passes.
+**Not yet verified:** the real-phone exit check (a phone on the actual stand router, Lighthouse mobile on `/ride`, and the uplink-unplugged repeat) needs a human with a phone and the travel router — not done in this session. `make burst` (50 rides in 10 s from 10 simulated IPs, run against the live stack) passed; the automated `make test-e2e` also passed. Don't treat the M4 exit as met until the real-phone steps run.
 
 ### M5: Hardening & rehearsal (D12–D14)
 - [ ] **All** 10-hour soak (`make soak`), which can run overnight D12→D13. Fix everything it finds (spec 10).

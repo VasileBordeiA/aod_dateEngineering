@@ -174,10 +174,9 @@ sequenceDiagram
     P->>W: scan QR, pick zones + tip
     W->>API: POST /api/rides
     API->>API: estimate distance/fare, pickup_ts = sim clock
-    API->>RP: trace.checkpoints: submitted
     API->>RP: trips.raw (key = trip_id)
     RP-->>API: delivery ack (partition, offset)
-    API->>RP: trace.checkpoints: ingested
+    API->>RP: trace.checkpoints: submitted + ingested
     API-->>W: 201 {trace_id}
     W->>API: WS /api/trace/{trace_id}
     API-->>W: replay history so far

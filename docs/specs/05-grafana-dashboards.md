@@ -157,6 +157,8 @@ Wall-clock stats use coloured backgrounds when they have thresholds. Info-only s
 | Agent questions / 10 min, success %, p95 latency, provider split, refusals | from `taxi.agent_log` (rates over the last 60 min) | success < 90% is amber. Success = `avgIf(success, NOT refused)`, since refusing off-topic questions is correct |
 | Agent errors (last 20) | `SELECT asked_at, provider, error FROM taxi.agent_log WHERE NOT success ORDER BY asked_at DESC LIMIT 20` | n/a |
 | ClickHouse slow queries | `system.query_log`, `query_duration_ms > 2000`, last 15 min | n/a |
+| Visitor rides today | `SELECT countIf(stage='submitted') FROM taxi.trace_events WHERE source='student' AND at >= toStartOfDay(now64(3))` | info only |
+| Visitor ride p95 phone → queryable | `quantile(0.95)` of `dateDiff('ms', at_submitted, at_queryable)` per trace, over today's student traces | green ≤ 2 s, red > 5 s |
 
 This dashboard reads `taxi.agent_log` and `system.query_log`, which `grafana_ro` must **not** have: anonymous viewers can send arbitrary SQL through Grafana's query API (spec 04).
 - A hidden folder is **not** enough. Grafana OSS has no datasource permissions, so any viewer can query any datasource of the org by uid, and `/api/frontend/settings` lists them all.
