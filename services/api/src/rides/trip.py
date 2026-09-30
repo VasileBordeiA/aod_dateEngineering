@@ -14,7 +14,7 @@ def _sim(dt: datetime) -> str:
 
 def build_trip(*, trace_id: str, pickup_ts: datetime, est: Estimate, amt: Amounts, pu_location_id: int,
                do_location_id: int, passenger_count: int, produced_at: str) -> dict[str, Any]:
-    dropoff = pickup_ts + timedelta(seconds=int(est.duration_min * 60))
+    dropoff = pickup_ts + timedelta(seconds=round(est.duration_min * 60))
     return {
         "trip_id": f"s-{trace_id}", "source": "student", "trace_id": trace_id, "loop": 0, "vendor_id": None,
         "pickup_ts": _sim(pickup_ts), "dropoff_ts": _sim(dropoff), "passenger_count": passenger_count,

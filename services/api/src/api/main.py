@@ -10,7 +10,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -20,10 +20,17 @@ from agent.catalog import Catalog
 from agent.golden import load_golden, suggestions
 from agent.providers import ProviderPool, openai_client
 from agent.service import AgentService, AskRequest
-from api.db import ClickHouseDb, Db, DbError, DbUnavailable
+from api.db import ClickHouseDb, ClickHouseTraceDb, Db, DbError, DbUnavailable
 from api.envconfig import Config
+from api.kafka import KafkaOut
 from api.simclock import SimClockFollower
-from rides.service import RideRejected, RideRequest
+from rides.checkpoints import TRACE_TOPIC
+from rides.history import TraceHistory
+from rides.hub import Hub
+from rides.queryable import QueryableDetector
+from rides.relay import TraceRelay
+from rides.service import RideRejected, RideRequest, RideService
+from rides.trace_service import TraceService, normalise_trace_id, serve
 
 
 class SimClockSource(Protocol):
@@ -39,7 +46,7 @@ class Deps:
     agent: Any = None  # agent.service.AgentService (Task 7)
     golden: tuple[Any, ...] = ()  # agent.golden.GoldenQuestion (Task 3)
     rides: Any = None  # rides.service.RideService (Task 3)
-    trace: Any = None  # rides.hub.Hub (Task 4)
+    trace: Any = None  # rides.trace_service.TraceService
 
 
 class OrderBody(BaseModel):
@@ -152,6 +159,29 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
         result: dict[str, Any] = await deps.rides.create(req, client_ip)
         return result
 
+    # /api/trace/live must be registered before /api/trace/{trace_id}, or "live" is parsed as an id
+    @app.websocket("/api/trace/live")
+    async def trace_live(ws: WebSocket) -> None:
+        await ws.accept()
+        await serve(ws, deps.trace.live(ws))
+
+    @app.websocket("/api/trace/{trace_id}")
+    async def trace_follow(ws: WebSocket, trace_id: str) -> None:
+        tid = normalise_trace_id(trace_id)
+        if tid is None:
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        await serve(ws, deps.trace.follow(ws, tid))
+
+    @app.get("/api/trace/{trace_id}")
+    async def trace_history(trace_id: str) -> dict[str, Any]:
+        tid = normalise_trace_id(trace_id)
+        cps = await deps.trace.history(tid) if tid else []
+        if not cps:
+            raise HTTPException(404, "No such ride.")
+        return {"trace_id": tid, "checkpoints": cps}
+
     @app.get("/api/llm/status")
     async def llm_status() -> dict[str, Any]:
         return dict(deps.pool.status()) | {"mode": deps.cfg.agent_mode}
@@ -192,14 +222,39 @@ def app_from_env() -> FastAPI:
     db = ClickHouseDb(cfg)
     catalog = Catalog(db)
     agent = AgentService(cfg, db, pool, catalog, golden)
-    deps = Deps(cfg=cfg, db=db, sim_clock=follower, pool=pool, agent=agent, golden=tuple(golden))
+    out = KafkaOut(cfg.brokers)
+    trace_db = ClickHouseTraceDb(cfg)
+    hub = Hub(TraceHistory(cfg.trace_history_ttl_s))
+
+    def emit(cp: dict[str, Any]) -> None:
+        out.send_nowait(TRACE_TOPIC, cp["trace_id"], cp)  # → taxi.trace_events (Kafka engine) and back via the relay
+        hub.publish(cp)
+
+    detector = QueryableDetector(trace_db, emit, cfg.trace_queryable_poll_ms)
+    hub.on_stored = detector.on_stored
+    rides = RideService(cfg, trace_db, out, follower, publish=hub.publish)
+    trace = TraceService(hub, trace_db, follower)
+    relay = TraceRelay(cfg.brokers)
+    deps = Deps(cfg=cfg, db=db, sim_clock=follower, pool=pool, agent=agent, golden=tuple(golden),
+                rides=rides, trace=trace)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        loop = asyncio.get_running_loop()
+
+        def deliver(cp: dict[str, Any]) -> None:  # relay thread → event loop (the Hub is event-loop only)
+            loop.call_soon_threadsafe(hub.publish, cp)
+
         follower.start()
-        health = asyncio.create_task(pool.health_loop(cfg.llm_health_interval_s))
+        out.start()
+        relay.start(deliver)
+        tasks = [asyncio.create_task(pool.health_loop(cfg.llm_health_interval_s)),
+                 asyncio.create_task(detector.run()), asyncio.create_task(rides.warm_up())]
         yield
-        health.cancel()
+        for t in tasks:
+            t.cancel()
+        relay.stop()
+        out.stop()
         follower.stop()
 
     return create_app(deps, lifespan)

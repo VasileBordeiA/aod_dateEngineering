@@ -36,5 +36,13 @@ def test_parse_checkpoint_accepts_good_and_ignores_garbage():
     assert parse_checkpoint(json.dumps(good).encode()) == good
     for bad in [b"", b"not json", b"[1]", json.dumps({**good, "stage": "teleported"}).encode(),
                 json.dumps({**good, "seq": "2"}).encode(), json.dumps({k: v for k, v in good.items() if k != "at"}).encode(),
+                json.dumps({k: v for k, v in good.items() if k != "trip_id"}).encode(),
+                json.dumps({**good, "trip_id": 7}).encode(),
+                json.dumps({k: v for k, v in good.items() if k != "source"}).encode(),
+                json.dumps({**good, "source": None}).encode(),
+                json.dumps({k: v for k, v in good.items() if k != "service"}).encode(),
+                json.dumps({**good, "service": ["api"]}).encode(),
+                json.dumps({k: v for k, v in good.items() if k != "detail"}).encode(),
+                json.dumps({**good, "detail": "{}"}).encode(),
                 None]:
         assert parse_checkpoint(bad) is None

@@ -28,3 +28,5 @@ def test_trip_follows_the_contract():
 def test_dropoff_after_pickup():
     assert trip(16.5)["dropoff_ts"] == "2025-10-09T17:58:30"
     assert trip(1.0)["dropoff_ts"] == "2025-10-09T17:43:00"
+    assert trip(3.3)["dropoff_ts"] == "2025-10-09T17:45:18"  # +198 s
+    assert trip(4.1)["dropoff_ts"] == "2025-10-09T17:46:06"  # 4.1 * 60 = 245.999…: rounded, not truncated

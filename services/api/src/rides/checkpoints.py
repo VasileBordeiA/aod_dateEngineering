@@ -45,4 +45,9 @@ def parse_checkpoint(value: bytes | None) -> dict[str, Any] | None:
         return None
     if not isinstance(cp.get("seq"), int) or not isinstance(cp.get("at"), str):
         return None
+    # the relay hands these to QueryableDetector, which reads trip_id/source; a KeyError there would stop it
+    if not all(isinstance(cp.get(k), str) for k in ("trip_id", "source", "service")):
+        return None
+    if not isinstance(cp.get("detail"), dict):
+        return None
     return cp
