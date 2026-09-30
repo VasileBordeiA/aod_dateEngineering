@@ -1,5 +1,13 @@
 import type { RowsData, Unit } from "@/lib/agent-events";
 
+/** Sim time is naive NYC local: format it as-is, never convert it (ARCHITECTURE §4). */
+export function formatSim(ts: string): string {
+  const d = new Date(`${ts.slice(0, 19)}Z`);
+  const f = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+  const p = Object.fromEntries(f.formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.weekday} ${p.day} ${p.month} ${p.hour}:${p.minute}`;
+}
+
 const n = (v: number, digits: number) =>
   v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 

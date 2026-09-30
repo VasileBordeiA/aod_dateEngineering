@@ -7,13 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "gen:types": "node scripts/gen-types.mjs",
+    "typecheck": "pnpm gen:types && tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "next": "16.3.6",
     "prism-react-renderer": "2.4.1",
+    "qrcode.react": "4.2.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "recharts": "3.10.1"
@@ -26,6 +28,7 @@
     "@types/react-dom": "19.3.0",
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.6",
+    "json-schema-to-typescript": "15.0.4",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vitest": "5.0.2"
