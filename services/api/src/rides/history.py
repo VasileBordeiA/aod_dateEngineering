@@ -51,6 +51,7 @@ class TraceHistory:
         return self.get(trace_id)
 
     def has_stage(self, trace_id: str, stage: str) -> bool:
+        self._expire(self._clock())
         entry = self._traces.get(trace_id)
         return entry is not None and stage in entry[1]
 

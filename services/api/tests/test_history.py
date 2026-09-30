@@ -62,3 +62,12 @@ def test_recent_student_newest_first_and_only_students():
     h.add(cp("s1", "ingested", 2))  # touching s1 makes it the newest
     assert [t for t, _ in h.recent_student(20)] == ["s1", "s2"]
     assert [t for t, _ in h.recent_student(1)] == ["s1"]
+
+
+def test_has_stage_respects_ttl():
+    clock = Clock()
+    h = TraceHistory(ttl_s=10, clock=clock)
+    h.add(cp("a", "submitted", 1))
+    clock.t = 11
+    assert h.has_stage("a", "submitted") is False
+    assert h.get("a") == []
