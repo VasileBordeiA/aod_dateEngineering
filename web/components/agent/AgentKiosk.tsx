@@ -8,6 +8,7 @@ import { AttractScreen } from "./AttractScreen";
 import { Header } from "./Header";
 import { AgentChart } from "./AgentChart";
 import { ResultTable } from "./ResultTable";
+import { RidePrompt, RIDE_RANK_QUESTION } from "./RidePrompt";
 import { SqlPanel } from "./SqlPanel";
 import { StepTimeline } from "./StepTimeline";
 import { SuggestionList } from "./SuggestionList";
@@ -15,12 +16,14 @@ import { useIdle } from "./useIdle";
 
 export const IDLE_MS = 90_000;
 
-export function AgentKiosk() {
+type AskOpts = { suggestionId?: string; rideTraceId?: string };
+
+export function AgentKiosk({ rideTraceId }: { rideTraceId?: string } = {}) {
   const [state, dispatch] = useReducer(reduce, initialState);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [offline, setOffline] = useState(false);
   const abort = useRef<AbortController | null>(null);
-  const last = useRef<{ question: string; suggestionId?: string } | null>(null);
+  const last = useRef<{ question: string; opts: AskOpts } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -45,15 +48,15 @@ export function AgentKiosk() {
     };
   }, []);
 
-  const ask = useCallback(async (question: string, suggestionId?: string) => {
+  const ask = useCallback(async (question: string, opts: AskOpts = {}) => {
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
-    last.current = { question, suggestionId };
+    last.current = { question, opts };
     dispatch({ type: "start", question });
     try {
-      const origin = suggestionId ? "suggested" : "typed";
-      for await (const event of askAgent({ question, origin, suggestion_id: suggestionId }, controller.signal)) {
+      const origin = opts.rideTraceId ? "ride" : opts.suggestionId ? "suggested" : "typed";
+      for await (const event of askAgent({ question, origin, suggestion_id: opts.suggestionId, trace_id: opts.rideTraceId }, controller.signal)) {
         // A newer question (or an idle reset) replaced this stream. Frames it already parsed must not
         // land in the new question's state, so stop before dispatching.
         if (controller !== abort.current || controller.signal.aborted) return;
@@ -73,10 +76,10 @@ export function AgentKiosk() {
     dispatch({ type: "reset" });
   }, []);
   const [idle, wake] = useIdle(IDLE_MS, reset, state);
-  const retry = () => last.current && ask(last.current.question, last.current.suggestionId);
+  const retry = () => last.current && ask(last.current.question, last.current.opts);
 
   if (idle) {
-    return <AttractScreen suggestions={suggestions} onPick={(s) => { wake(); void ask(s.question, s.id); }} />;
+    return <AttractScreen suggestions={suggestions} onPick={(s) => { wake(); void ask(s.question, { suggestionId: s.id }); }} />;
   }
   const running = state.phase === "running";
   const showChart = state.rows && state.chart && state.chart.type !== "table" && state.rows.rows.length > 0;
@@ -94,8 +97,9 @@ export function AgentKiosk() {
       )}
       <main className="grid flex-1 grid-cols-1 gap-6 p-6 lg:min-h-0 lg:grid-cols-[minmax(0,5fr)_minmax(0,8fr)]">
         <section aria-label="Ask" className="flex min-w-0 flex-col gap-5 lg:min-h-0 lg:overflow-y-auto">
+          {rideTraceId && <RidePrompt traceId={rideTraceId} onAsk={() => void ask(RIDE_RANK_QUESTION, { rideTraceId })} />}
           <AskForm busy={running} onAsk={(q) => void ask(q)} />
-          <SuggestionList suggestions={suggestions} onPick={(s) => void ask(s.question, s.id)} />
+          <SuggestionList suggestions={suggestions} onPick={(s) => void ask(s.question, { suggestionId: s.id })} />
           <StepTimeline steps={state.steps} running={running} startedKey={state.question} />
         </section>
         <section aria-label="What the AI did" className="flex min-w-0 flex-col gap-5 lg:min-h-0 lg:overflow-y-auto">

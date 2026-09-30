@@ -59,6 +59,35 @@ def ask(api: str, payload: dict[str, Any], ip: str, timeout: float) -> tuple[lis
     return events, first or 0.0, time.monotonic() - started
 
 
+# One card and one cash ride for the ride-context questions (evals/agent_golden_questions.yaml: ride: card | cash)
+EVAL_RIDES = {
+    "card": {"pickup_location_id": 161, "dropoff_location_id": 132, "payment": "card",
+             "tip_amount": 5.0, "passenger_count": 1},
+    "cash": {"pickup_location_id": 161, "dropoff_location_id": 132, "payment": "cash",
+             "tip_amount": 5.0, "passenger_count": 1},
+}
+
+
+def create_rides(api: str, ch: Any, timeout_s: float = 20) -> dict[str, str]:
+    """Book the eval rides through POST /api/rides and wait until agent_ro can see both (spec 07 queryable)."""
+    ids = {kind: request("POST", f"{api}/api/rides", body, headers={"X-Forwarded-For": "10.250.2.1"})["trace_id"]
+           for kind, body in EVAL_RIDES.items()}
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        rows = ch.query("SELECT DISTINCT toString(trace_id) FROM taxi.trips WHERE trace_id IN {ids:Array(UUID)}",
+                        parameters={"ids": list(ids.values())}).result_rows
+        if {r[0] for r in rows} == set(ids.values()):
+            return ids
+        time.sleep(0.5)
+    raise SystemExit("the eval rides never reached taxi.trips: is the processor running?")
+
+
+def ride_question(q: dict[str, Any], rides: dict[str, str]) -> tuple[str, dict[str, Any]]:
+    """(reference_sql, payload) for a ride-context question, with the harness's own ride ids filled in."""
+    sql = q["reference_sql"].replace("{trace_id_card}", rides["card"]).replace("{trace_id_cash}", rides["cash"])
+    return sql, {"question": q["question"], "origin": "ride", "trace_id": rides[q["ride"]]}
+
+
 def plain(v: Any) -> Any:
     if isinstance(v, Decimal):
         return float(v)
@@ -128,16 +157,18 @@ def main(argv: list[str] | None = None) -> int:
         if not request("GET", f"{args.control}/status").get("paused"):
             raise SystemExit("the replayer did not pause: refusing to evaluate on moving data (spec 10)")
         sim_now = wait_until_frozen(ch)
+        rides = create_rides(args.api, ch) if any(q.get("origin") == "ride" for q in questions) else {}
         ask(args.api, {"question": WARMUP, "origin": "typed"}, "10.250.1.1", args.timeout)  # warm-up, not scored
         for i, q in enumerate(questions):
-            if q.get("origin") == "ride":
-                results.append({"id": q["id"], "skipped": "needs POST /api/rides (M4)", "suggested": False})
-                continue
-            payload: dict[str, Any] = {"question": q["question"], "origin": q.get("origin", "typed")}
-            if q.get("suggested"):
-                payload["suggestion_id"] = q["id"]
             started = time.monotonic()
             try:
+                if q.get("origin") == "ride":
+                    reference_sql, payload = ride_question(q, rides)
+                else:
+                    reference_sql = q["reference_sql"]
+                    payload = {"question": q["question"], "origin": q.get("origin", "typed")}
+                    if q.get("suggested"):
+                        payload["suggestion_id"] = q["id"]
                 events, first_s, total_s = ask(args.api, payload, f"10.250.0.{i + 2}", args.timeout)
                 by: dict[str, list[Any]] = {}
                 for e, d in events:
@@ -145,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
                 answer = by["answer"][-1]["text"] if "answer" in by else None
                 rows = by["rows"][-1] if "rows" in by else None
                 done = by.get("done", [{}])[-1]
-                ref = ch.query(q["reference_sql"])
+                ref = ch.query(reference_sql)
                 ok, why = check_result(q["check"], agent_rows=rows["rows"] if rows else None,
                                        ref_columns=ref.column_names, ref_rows=[plain(r) for r in ref.result_rows],
                                        answer=answer, had_rows=rows is not None,
@@ -157,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
                           "repairs": done.get("repairs", 0), "provider": done.get("provider"),
                           "mode": done.get("mode"), "error": by["error"][-1]["code"] if "error" in by else "",
                           "answer": answer, "agent_sql": by["sql"][-1]["sql"] if "sql" in by else "",
-                          "reference_sql": q["reference_sql"]}
+                          "reference_sql": reference_sql}
             except Exception as exc:  # one bad question must not abort the run (spec 10 acceptance 2)
                 result = error_result(q, time.monotonic() - started, exc)
             results.append(result)
