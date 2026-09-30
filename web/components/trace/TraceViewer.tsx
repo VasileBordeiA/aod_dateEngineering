@@ -16,9 +16,12 @@ const WITH_REJECTED: Stage[] = ["submitted", "ingested", "rejected", "enriched",
 
 function NotFound() {
   return (
-    <p role="status" className="rounded-xl border border-line px-4 py-3">
-      We can&apos;t find this ride. <Link href="/ride" className="font-semibold text-visitor-ink underline">Book a new one</Link>
-    </p>
+    <div role="status" className="flex flex-col gap-3 rounded-xl border border-line px-4 py-3">
+      <p>We can&apos;t find this ride.</p>
+      <Link href="/ride" className="flex min-h-14 items-center justify-center rounded-xl border-2 border-visitor text-lg font-semibold text-visitor-ink">
+        Book a new one
+      </Link>
+    </div>
   );
 }
 
@@ -43,7 +46,7 @@ export function TraceViewer({ traceId }: { traceId: string }) {
   const cps = view.checkpoints;
   const terminal = cps.some((c) => TERMINAL.has(c.stage));
   useEffect(() => {
-    if (terminal) socket.current?.stop(); // nothing more will come: don't reconnect when the server closes
+    if (terminal) socket.current?.stop(); // nothing more will come: close now instead of reconnecting
   }, [terminal]);
   useEffect(() => {
     if (terminal) return;

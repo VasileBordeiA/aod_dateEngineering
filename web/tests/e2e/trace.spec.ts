@@ -87,7 +87,10 @@ test("a malformed id never opens a socket", async ({ page }) => {
   let opened = false;
   await mockTraceSocket(page, () => { opened = true; });
   await page.goto("/trace/not-a-ride");
-  await expect(page.getByRole("link", { name: "Book a new one" })).toBeVisible();
+  const link = page.getByRole("link", { name: "Book a new one" });
+  await expect(link).toBeVisible();
+  const box = await link.boundingBox();
+  expect(box?.height).toBeGreaterThanOrEqual(44);
   expect(opened).toBe(false);
 });
 
