@@ -36,3 +36,20 @@ export async function mockTraceSocket(page: Page, onConnect: (ws: WebSocketRoute
 }
 
 export const send = (ws: WebSocketRoute, msg: unknown) => ws.send(JSON.stringify(msg));
+
+const T0 = Date.parse("2026-10-16T10:31:07.000Z");
+type Stage = "submitted" | "ingested" | "validated" | "rejected" | "enriched" | "aggregated" | "stored" | "queryable";
+const cp = (stage: Stage, seq: number, ms: number, detail: Record<string, unknown>, service = "processor") => ({
+  trace_id: TID, trip_id: `s-${TID}`, source: "student", stage, seq, service, at: new Date(T0 + ms).toISOString(), detail,
+});
+export const CP = {
+  submitted: cp("submitted", 1, 0, { pickup_zone: "Times Sq/Theatre District", dropoff_zone: "JFK Airport", payment: "card", tip_amount: 3.9, fare_amount: 19.5, estimate_method: "median of 214 real trips between these zones" }, "api"),
+  ingested: cp("ingested", 2, 41, { topic: "trips.raw", partition: 0, offset: 482113 }, "api"),
+  validated: cp("validated", 3, 103, { rules_checked: 11 }),
+  enriched: cp("enriched", 4, 104, { pu_zone: "Times Sq/Theatre District", pu_borough: "Manhattan", do_zone: "JFK Airport", do_borough: "Queens", tip_pct: 20, duration_min: 16.5 }),
+  aggregated: cp("aggregated", 5, 104, { window_start: "2025-10-09T17:42:00", borough: "Manhattan" }),
+  stored: cp("stored", 6, 1210, { table: "taxi.trips", batch_rows: 142 }),
+  queryable: cp("queryable", 7, 1800, { table: "taxi.trips", visible_after_ms: 590 }, "api"),
+  rejected: cp("rejected", 3, 98, { reasons: ["TIP_UNREALISTIC"] }),
+};
+export const HAPPY = ["submitted", "ingested", "validated", "enriched", "aggregated", "stored", "queryable"] as const;
