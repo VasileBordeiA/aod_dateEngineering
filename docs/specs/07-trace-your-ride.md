@@ -45,7 +45,7 @@ sequenceDiagram
     PR->>RP: stored
     RP->>API: relay consumes trace.checkpoints
     API-->>W: push each checkpoint (WS)
-    API->>CH: poll SELECT 1 WHERE trace_id = ? (agent_ro)
+    API->>CH: batched poll: DISTINCT trace_id IN pending ids (trace_ro)
     API->>RP: queryable
     API-->>W: push queryable
     W->>P: "Ask the agent where your ride ranks"
@@ -144,7 +144,7 @@ Errors: `429` for the rate limit (`RIDES_RATE_LIMIT_PER_MIN` per IP, plus a glob
    - `total_amount` = the sum of all of the above.
    - `dropoff_ts = pickup_ts + duration`.
 5. Produce the trip to `trips.raw` (key `trip_id`, and it must validate against `trip.schema.json`). Wait for the delivery report (≤ 2 s).
-6. Produce `submitted` (seq 1) to `trace.checkpoints`, key `trace_id`, with `at` = the moment the request was accepted (captured in step 1, before the estimate and the broker round trip).
+6. Produce `submitted` (seq 1) to `trace.checkpoints`, key `trace_id`, with `at` = the moment the request was accepted (captured when the request is accepted, before the estimate and the broker round trip).
 7. Produce `ingested` (seq 2) with `{topic, partition, offset}` and return `201`.
 
 `submitted` goes out only after the `trips.raw` ack, so a broker failure never leaves a dangling `submitted` with nothing after it; its `at` still reflects the true request-acceptance time (not the delayed emit), and the viewer's strict `seq` ordering (not arrival order) keeps stage order correct either way.

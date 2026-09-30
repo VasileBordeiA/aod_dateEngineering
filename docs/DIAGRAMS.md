@@ -188,7 +188,7 @@ sequenceDiagram
     PR->>RP: stored
     RP->>API: relay consumes trace.checkpoints
     API-->>W: push each checkpoint (WS)
-    API->>CH: poll SELECT 1 WHERE trace_id = ? (agent_ro)
+    API->>CH: batched poll: DISTINCT trace_id IN pending ids (trace_ro)
     API->>RP: queryable
     API-->>W: push queryable
     W->>P: "Ask the agent where your ride ranks"
