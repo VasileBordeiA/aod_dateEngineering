@@ -57,6 +57,17 @@ test-integration: ## testcontainers integration tests (needs Docker running)
 test-stack: ## Checks against the running stack (after make up)
 	uv run pytest -q -m stack
 
+test-e2e: ## Trace your ride end to end on the running stack (spec 07 acceptance 3-6)
+	uv run pytest -q -m e2e
+
+burst: ## 50 rides in 10 s from 10 simulated phones (spec 07 acceptance 7). Book no other rides in the minute before.
+	uv run python scripts/burst_rides.py
+
+reset-rides: ## Delete every visitor ride (trips, rejects, trace events). Asks first.
+	@read -p "Delete all student rides? [y/N] " a && [ "$$a" = y ]
+	$(COMPOSE) exec -T clickhouse clickhouse-client --user admin --password "$(CLICKHOUSE_ADMIN_PASSWORD)" --multiquery -q \
+	  "DELETE FROM taxi.trips WHERE source = 'student'; DELETE FROM taxi.trips_rejected WHERE source = 'student'; DELETE FROM taxi.trace_events WHERE source = 'student'"
+
 lint: ## ruff + mypy
 	uv run ruff check scripts contracts infra
 	cd services/replayer && uv run ruff check src tests && uv run mypy src
@@ -109,4 +120,4 @@ llm: ## Switch the LLM provider order live: make llm ORDER=internal,local (ORDER
 ollama-model: ## Derive a stand model with a 16 k context: make ollama-model BASE=qwen2.5-coder:14b
 	@bash scripts/ollama_model.sh "$(BASE)"
 
-.PHONY: help secrets data up down reset status logs images test test-integration test-stack lint smoke backfill pause resume speed migrate diagrams-sync docs-check eval llm ollama-model
+.PHONY: help secrets data up down reset status logs images test test-integration test-stack test-e2e burst reset-rides lint smoke backfill pause resume speed migrate diagrams-sync docs-check eval llm ollama-model
