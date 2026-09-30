@@ -57,8 +57,14 @@ class QueryableDetector:
         if not self._pending:
             return
         ids = list(self._pending)
-        r = await self._db.query(VISIBLE_SQL, {"ids": ids})
-        visible = {str(row[0]) for row in r.rows}
+        try:
+            r = await self._db.query(VISIBLE_SQL, {"ids": ids})
+        except Exception:
+            self._settle(ids, set())  # a failing poll must not stop pending traces from timing out
+            raise
+        self._settle(ids, {str(row[0]) for row in r.rows})
+
+    def _settle(self, ids: list[str], visible: set[str]) -> None:
         now = self._clock()
         for tid in ids:
             p = self._pending[tid]
@@ -76,6 +82,8 @@ class QueryableDetector:
             await self.tick()
         except (DbError, DbUnavailable) as exc:
             log.event("queryable_poll_failed", error=str(exc)[:200])
+        except Exception as exc:  # anything else is a bug, but it must never stop the poller for every visitor
+            log.event("queryable_poll_failed", error=log.error_label(exc), where=log.error_where(exc))
 
     async def run(self) -> None:
         while True:

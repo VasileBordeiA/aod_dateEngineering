@@ -1,4 +1,6 @@
+import asyncio
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from conftest import FakeTraceDb
@@ -85,3 +87,59 @@ async def test_database_down_does_not_kill_the_poller():
     db.fail = DbUnavailable("down")
     await d.safe_tick()  # logged, not raised
     assert d.pending == 1 and emitted == []
+
+
+@pytest.mark.anyio
+async def test_times_out_while_the_database_is_down():
+    db = FakeTraceDb()
+    d, emitted, t = detector(db)
+    d.on_stored(stored())
+    db.fail = DbUnavailable("down")
+    t[0] = 10.0
+    await d.safe_tick()
+    assert d.pending == 0 and emitted == []
+
+
+@pytest.mark.anyio
+async def test_waiting_traces_are_promoted_while_the_database_is_down():
+    db = FakeTraceDb()
+    d, _, t = detector(db)
+    for i in range(25):
+        d.on_stored(stored(f"00000000-0000-0000-0000-{i:012d}"))
+    db.fail = DbUnavailable("down")
+    t[0] = 10.0
+    await d.safe_tick()
+    assert d.pending == 5
+
+
+class BrokenOnce(FakeTraceDb):
+    """The first query raises something nobody expected; after that it answers normally."""
+
+    def __init__(self, results: dict[str, Result]) -> None:
+        super().__init__(results)
+        self.raised = 0
+
+    async def query(self, sql: str, params: dict[str, Any]) -> Result:
+        if not self.raised:
+            self.raised += 1
+            raise RuntimeError("surprise")
+        return await super().query(sql, params)
+
+
+@pytest.mark.anyio
+async def test_an_unexpected_error_does_not_end_the_loop():
+    db = BrokenOnce({"FROM taxi.trips": visible(TID)})
+    emitted: list[dict] = []
+    d = QueryableDetector(db, emitted.append, 1)
+    d.on_stored(stored())
+    task = asyncio.create_task(d.run())
+    try:
+        for _ in range(200):
+            if emitted:
+                break
+            await asyncio.sleep(0.005)
+        assert not task.done()  # still polling
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert db.raised == 1 and [c["stage"] for c in emitted] == ["queryable"]

@@ -44,5 +44,16 @@ def test_parse_checkpoint_accepts_good_and_ignores_garbage():
                 json.dumps({**good, "service": ["api"]}).encode(),
                 json.dumps({k: v for k, v in good.items() if k != "detail"}).encode(),
                 json.dumps({**good, "detail": "{}"}).encode(),
+                json.dumps({**good, "at": "2026-10-16T10:31:08Z"}).encode(),  # parse_wall needs milliseconds
+                json.dumps({**good, "at": "yesterday"}).encode(),
+                json.dumps({**good, "trace_id": "not-a-uuid"}).encode(),
+                json.dumps({**good, "trace_id": "'; DROP TABLE x; --"}).encode(),
                 None]:
         assert parse_checkpoint(bad) is None
+
+
+def test_parse_checkpoint_normalises_the_trace_id():
+    # ClickHouse returns UUIDs lowercase: an uppercase id would never match the queryable poll
+    upper = checkpoint(TID.upper(), f"s-{TID}", "student", "stored", {}, "2026-10-16T10:31:08.000Z")
+    got = parse_checkpoint(json.dumps(upper).encode())
+    assert got is not None and got["trace_id"] == TID

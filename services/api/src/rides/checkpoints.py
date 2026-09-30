@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
@@ -50,4 +51,9 @@ def parse_checkpoint(value: bytes | None) -> dict[str, Any] | None:
         return None
     if not isinstance(cp.get("detail"), dict):
         return None
-    return cp
+    try:
+        parse_wall(cp["at"])  # the detector computes visible_after_ms from it
+        trace_id = str(uuid.UUID(cp["trace_id"]))  # canonical lowercase, like the UUIDs ClickHouse returns
+    except ValueError:
+        return None
+    return {**cp, "trace_id": trace_id}
