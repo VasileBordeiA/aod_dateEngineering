@@ -33,6 +33,7 @@ SIM_NOW_SQL = "SELECT now_ts FROM taxi.sim_now"
 ESTIMATE_CACHE = 2000
 BROKER_DOWN = "The pipeline is catching its breath, try again in a moment"
 BUSY = "The dispatcher is busy, try again in a few seconds"
+ZONES_LOADING = "The zone list is still loading, try again in a moment"
 
 
 class RideClock(Protocol):
@@ -68,12 +69,15 @@ class RideService:
     async def warm_up(self) -> None:
         try:
             await self.zones()
-        except (DbError, DbUnavailable) as exc:
-            log.event("zones_warmup_failed", error=str(exc)[:200])
+        except (RideRejected, DbUnavailable) as exc:
+            log.event("zones_warmup_failed", error=str(exc.__cause__ or exc)[:200])
 
     async def zones(self) -> dict[int, Zone]:
         if not self._zones:
-            r = await self._db.query(ZONES_SQL, {})
+            try:
+                r = await self._db.query(ZONES_SQL, {})
+            except DbError as exc:  # e.g. the trace_ro quota: a 503 the phone retries, not a 500
+                raise RideRejected(503, ZONES_LOADING) from exc
             self._zones = {int(row[0]): Zone(int(row[0]), str(row[1]), str(row[2]), str(row[3]), row[4], row[5])
                            for row in r.rows}
         return self._zones
@@ -85,7 +89,7 @@ class RideService:
             return self._estimates[key]
         zones = await self.zones()
         if pu not in zones or do not in zones:
-            raise RideRejected(503, "The zone list is still loading, try again in a moment")
+            raise RideRejected(503, ZONES_LOADING)
         try:
             r = await self._db.query(MEDIAN_SQL, {"pickup": pu, "dropoff": do})
         except (DbError, DbUnavailable):

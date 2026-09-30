@@ -49,6 +49,7 @@ class Config:
     rides_global_per_min: int
     trace_history_ttl_s: float
     trace_queryable_poll_ms: int
+    trace_read_rate_limit_per_min: int
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Config:
@@ -99,4 +100,5 @@ class Config:
             rides_global_per_min=int(get("RIDES_GLOBAL_PER_MIN", "30")),
             trace_history_ttl_s=float(get("TRACE_HISTORY_TTL_S", "3600")),
             trace_queryable_poll_ms=int(get("TRACE_QUERYABLE_POLL_MS", "250")),
+            trace_read_rate_limit_per_min=int(get("TRACE_READ_RATE_LIMIT_PER_MIN", "120")),
         )

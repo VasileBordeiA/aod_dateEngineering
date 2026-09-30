@@ -37,6 +37,10 @@ WHERE rn > 1
 GROUP BY stage
 ORDER BY any(seq)
 """
+# A follower that hears nothing for REFRESH_AFTER_S re-reads the history, in case the relay missed checkpoints while
+# it (re)joined. Each refresh that finds nothing doubles the wait, up to REFRESH_MAX_S, so a stuck trace stays cheap.
+REFRESH_AFTER_S = 5.0
+REFRESH_MAX_S = 60.0
 
 
 class Sender(Protocol):
@@ -72,9 +76,11 @@ def _row_checkpoint(row: dict[str, Any]) -> dict[str, Any]:
 
 class TraceService:
     def __init__(self, hub: Hub, db: TraceDb, sim_clock: LatestClock, *, follow_max_s: float = 600,
-                 after_terminal_s: float = 60, clock_every_s: float = 1.0, stats_every_s: float = 5.0) -> None:
+                 after_terminal_s: float = 60, clock_every_s: float = 1.0, stats_every_s: float = 5.0,
+                 refresh_after_s: float = REFRESH_AFTER_S) -> None:
         self._hub, self._db, self._sim = hub, db, sim_clock
         self._follow_max, self._after_terminal = follow_max_s, after_terminal_s
+        self._refresh_after = refresh_after_s
         self._clock_every, self._stats_every = clock_every_s, stats_every_s
         self._stats: dict[str, Any] | None = None
         self._stats_at = float("-inf")
@@ -83,7 +89,7 @@ class TraceService:
         latest = self._sim.latest
         return str(latest["sim_ts"]) if latest and "sim_ts" in latest else None
 
-    async def history(self, trace_id: str) -> list[dict[str, Any]]:
+    async def history(self, trace_id: str, rearm: bool = True) -> list[dict[str, Any]]:
         """Memory ∪ taxi.trace_events, dedup by stage. After an api restart, memory only has what came since."""
         try:
             r = await self._db.query(HISTORY_SQL, {"id": trace_id})
@@ -92,7 +98,7 @@ class TraceService:
             stored = []
         cps = self._hub.history.merge(trace_id, stored) if stored else self._hub.history.get(trace_id)
         stages = {c["stage"] for c in cps}
-        if "stored" in stages and not stages & TERMINAL and self._hub.on_stored is not None:
+        if rearm and "stored" in stages and not stages & TERMINAL and self._hub.on_stored is not None:
             # restarted between `stored` and `queryable`: poll again so the viewer still reaches the end
             self._hub.on_stored(next(c for c in cps if c["stage"] == "stored"))
         return cps
@@ -107,11 +113,20 @@ class TraceService:
             deadline = loop.time() + self._follow_max
             if seen & TERMINAL:
                 deadline = min(deadline, loop.time() + self._after_terminal)
+            refresh_in = self._refresh_after
             while (left := deadline - loop.time()) > 0:
+                wait = left if seen & TERMINAL else min(left, refresh_in)
                 try:
-                    cp = await asyncio.wait_for(q.get(), left)
+                    cp = await asyncio.wait_for(q.get(), wait)
                 except TimeoutError:
-                    break
+                    if wait >= left:  # the deadline itself
+                        break
+                    found = await self._catch_up(ws, trace_id, seen)
+                    refresh_in = self._refresh_after if found else min(refresh_in * 2, REFRESH_MAX_S)
+                    if seen & TERMINAL:
+                        deadline = min(deadline, loop.time() + self._after_terminal)
+                    continue
+                refresh_in = self._refresh_after
                 if cp["stage"] in seen:
                     continue
                 seen.add(cp["stage"])
@@ -121,6 +136,17 @@ class TraceService:
             await ws.close(1000)
         finally:
             self._hub.unfollow(trace_id, q)
+
+    async def _catch_up(self, ws: Sender, trace_id: str, seen: set[str]) -> bool:
+        """Send the stages this follower hasn't seen yet from a fresh history read. True if there were any."""
+        new = [c for c in await self.history(trace_id, rearm=False) if c["stage"] not in seen]
+        for c in new:
+            seen.add(c["stage"])
+            await ws.send_json({"type": "checkpoint", **c})
+        stored = next((c for c in new if c["stage"] == "stored"), None)
+        if stored is not None and not seen & TERMINAL and self._hub.on_stored is not None:
+            self._hub.on_stored(stored)  # the hub never saw this `stored`, so the queryable poll never started
+        return bool(new)
 
     async def stats(self) -> dict[str, Any] | None:
         now = asyncio.get_running_loop().time()

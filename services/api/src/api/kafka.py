@@ -12,9 +12,11 @@ from confluent_kafka import KafkaException, Producer
 from api import log
 
 SEND_WAIT_S = 2.5
-# librdkafka gives up (and reports it) after 2 s. That is before POST /api/rides stops waiting, so a ride that got a
-# 503 is never delivered later (spec 07 §Failure modes: "no submitted is left dangling").
-PRODUCER_CONFIG: dict[str, Any] = {"linger.ms": 2, "acks": "all", "message.timeout.ms": 2000}
+# librdkafka gives up (and reports it) after 1 s. That is well before POST /api/rides stops waiting, so a ride that
+# got a 503 is not retried later (spec 07 §Failure modes: "no submitted is left dangling"). The 1.5 s margin covers
+# the delivery-report hop to the event loop. A "possibly persisted" timeout can still land: see spec 07.
+PRODUCER_CONFIG: dict[str, Any] = {"linger.ms": 2, "acks": "all", "message.timeout.ms": 1000}
+POLL_ERROR_BACKOFF_S = 0.5
 
 
 class Delivery(NamedTuple):
@@ -55,9 +57,18 @@ class KafkaOut:
         self._stop.set()
         self._p.flush(3)
 
+    @property
+    def alive(self) -> bool:
+        """The delivery thread is running (/api/healthz)."""
+        return self._thread.is_alive()
+
     def _poll(self) -> None:
         while not self._stop.is_set():
-            self._p.poll(0.1)  # runs the delivery callbacks
+            try:
+                self._p.poll(0.1)  # runs the delivery callbacks
+            except Exception as exc:  # never let the thread die: every later send would time out with a 503
+                log.event("kafka_out_error", error=log.error_label(exc), where=log.error_where(exc))
+                self._stop.wait(POLL_ERROR_BACKOFF_S)
 
     async def send(self, topic: str, key: str, value: dict[str, Any]) -> Delivery:
         """Produce and wait for the broker's acknowledgement (at most SEND_WAIT_S)."""

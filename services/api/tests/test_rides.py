@@ -5,7 +5,7 @@ from conftest import FakeDb, FakeOut, FakeRideClock, FakeTraceDb, make_config
 from contract_validator import assert_valid
 from fastapi.testclient import TestClient
 
-from api.db import DbUnavailable, Result
+from api.db import DbError, DbUnavailable, Result
 from api.main import Deps, create_app
 from rides.service import RideRejected, RideRequest, RideService
 
@@ -143,6 +143,19 @@ async def test_published_checkpoints_reach_the_hub_immediately():
     assert seen == ["submitted", "ingested"]
 
 
+@pytest.mark.anyio
+async def test_cold_zone_cache_and_a_clickhouse_error_is_503_not_500():
+    svc, db, out = service()
+    db.fail = DbError("Code: 201. DB::Exception: Quota for user `trace_ro` has been exceeded")
+    with pytest.raises(RideRejected) as e:
+        await svc.create(CARD, "10.0.0.1")
+    assert e.value.status == 503 and e.value.message == "The zone list is still loading, try again in a moment"
+    assert out.sent == []
+    await svc.warm_up()  # logged, never raised: the lifespan task must not die
+    r = app(svc).post("/api/rides", json=BODY)
+    assert r.status_code == 503 and r.json()["detail"] == "The zone list is still loading, try again in a moment"
+
+
 def app(svc: RideService) -> TestClient:
     return TestClient(create_app(Deps(cfg=make_config(), db=FakeDb(), sim_clock=FakeRideClock(), rides=svc)))
 
@@ -160,7 +173,7 @@ def test_post_rides_returns_201():
 @pytest.mark.parametrize(("field", "value"), [
     ("pickup_location_id", 0), ("pickup_location_id", 264), ("pickup_location_id", "230"), ("pickup_location_id", 23.5),
     ("dropoff_location_id", -1), ("payment", "bitcoin"), ("tip_amount", -0.01), ("tip_amount", 999.01),
-    ("tip_amount", 1.234), ("tip_amount", "5"), ("tip_amount", True), ("passenger_count", 0), ("passenger_count", 7),
+    ("tip_amount", 1.234), ("tip_amount", "5"), ("tip_amount", True), ("tip_amount", 10**400), ("passenger_count", 0), ("passenger_count", 7),
     ("passenger_count", True),
 ])
 def test_invalid_field_is_422_naming_it(field, value):

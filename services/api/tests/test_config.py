@@ -35,6 +35,7 @@ def test_ride_and_trace_settings_have_spec_defaults():
     assert cfg.trace_user == "trace_ro" and cfg.trace_password == "t"
     assert cfg.rides_rate_limit_per_min == 3 and cfg.rides_global_per_min == 30
     assert cfg.trace_history_ttl_s == 3600 and cfg.trace_queryable_poll_ms == 250
+    assert cfg.trace_read_rate_limit_per_min == 120
 
 
 def test_trace_password_is_required():

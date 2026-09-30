@@ -15,6 +15,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from starlette.requests import HTTPConnection
 
 from agent.catalog import Catalog
 from agent.golden import load_golden, suggestions
@@ -23,6 +24,7 @@ from agent.service import AgentService, AskRequest
 from api.db import ClickHouseDb, ClickHouseTraceDb, Db, DbError, DbUnavailable
 from api.envconfig import Config
 from api.kafka import KafkaOut
+from api.ratelimit import TokenBucket
 from api.simclock import SimClockFollower
 from rides.checkpoints import TRACE_TOPIC
 from rides.history import TraceHistory
@@ -47,6 +49,8 @@ class Deps:
     golden: tuple[Any, ...] = ()  # agent.golden.GoldenQuestion (Task 3)
     rides: Any = None  # rides.service.RideService (Task 3)
     trace: Any = None  # rides.trace_service.TraceService
+    out: Any = None  # api.kafka.KafkaOut: /api/healthz reports whether its thread is alive (None: not reported)
+    relay: Any = None  # rides.relay.TraceRelay: likewise
 
 
 class OrderBody(BaseModel):
@@ -84,19 +88,40 @@ class RideBody(BaseModel):
     @field_validator("tip_amount", mode="before")
     @classmethod
     def money(cls, v: Any) -> Any:
-        if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+        if isinstance(v, bool) or not isinstance(v, int | float):
             raise ValueError("tip_amount must be a number")
-        if abs(round(v, 2) - v) > 1e-9:
+        try:
+            f = float(v)  # a JSON integer can be arbitrarily large: 10**400 doesn't fit a float
+        except OverflowError:
+            raise ValueError("tip_amount must be a number") from None
+        if not math.isfinite(f):
+            raise ValueError("tip_amount must be a number")
+        if abs(round(f, 2) - f) > 1e-9:
             raise ValueError("tip_amount has at most 2 decimals")
-        return v
+        return f
 
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
+READS_BUSY = "Too many requests, try again in a few seconds"
+WS_TRY_AGAIN_LATER = 1013
 
 
 def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
     app = FastAPI(title="NYC Taxi Live api", lifespan=lifespan, docs_url=None, redoc_url=None)
     zones_cache: list[dict[str, Any]] = []
+    # One per-IP bucket for the public trace reads (estimate, trace history, each WS connect): they share the
+    # trace_ro quota with the queryable poller, so one phone reloading in a loop can't starve it.
+    reads = TokenBucket(deps.cfg.trace_read_rate_limit_per_min)
+
+    def read_wait_s(conn: HTTPConnection) -> int | None:
+        """None if this read is allowed, else the seconds to wait. The IP is only the in-memory key, never logged."""
+        ok, retry = reads.allow(conn.client.host if conn.client else "unknown")
+        return None if ok else max(1, math.ceil(retry))
+
+    def limit_read(request: Request) -> None:
+        wait = read_wait_s(request)
+        if wait is not None:
+            raise RideRejected(429, READS_BUSY, wait)  # same body and Retry-After header as the ride limits
 
     @app.exception_handler(DbUnavailable)
     async def db_down(_: Request, __: DbUnavailable) -> JSONResponse:
@@ -125,7 +150,12 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
             clickhouse = True
         except (DbError, DbUnavailable):
             clickhouse = False
-        return {"ok": True, "clickhouse": clickhouse, "sim_clock": deps.sim_clock.latest is not None}
+        body: dict[str, Any] = {"ok": True, "clickhouse": clickhouse, "sim_clock": deps.sim_clock.latest is not None}
+        if deps.out is not None:
+            body["kafka_out"] = bool(deps.out.alive)
+        if deps.relay is not None:
+            body["trace_relay"] = bool(deps.relay.alive)
+        return body
 
     @app.get("/api/zones")
     async def zones() -> list[dict[str, Any]]:
@@ -144,8 +174,9 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
         return deps.sim_clock.latest
 
     @app.get("/api/rides/estimate")
-    async def ride_estimate(pickup_location_id: int = Query(ge=1, le=263),
+    async def ride_estimate(request: Request, pickup_location_id: int = Query(ge=1, le=263),
                             dropoff_location_id: int = Query(ge=1, le=263)) -> dict[str, Any]:
+        limit_read(request)
         est = await deps.rides.estimate(pickup_location_id, dropoff_location_id)
         return {"trip_distance": est.trip_distance, "duration_min": est.duration_min,
                 "fare_amount": est.fare_amount, "method": est.method}
@@ -163,6 +194,9 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
     @app.websocket("/api/trace/live")
     async def trace_live(ws: WebSocket) -> None:
         await ws.accept()
+        if read_wait_s(ws) is not None:
+            await ws.close(code=WS_TRY_AGAIN_LATER)  # the web client reconnects with a back-off
+            return
         await serve(ws, deps.trace.live(ws))
 
     @app.websocket("/api/trace/{trace_id}")
@@ -172,10 +206,14 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
             await ws.close(code=1008)
             return
         await ws.accept()
+        if read_wait_s(ws) is not None:
+            await ws.close(code=WS_TRY_AGAIN_LATER)  # the web client reconnects with a back-off
+            return
         await serve(ws, deps.trace.follow(ws, tid))
 
     @app.get("/api/trace/{trace_id}")
-    async def trace_history(trace_id: str) -> dict[str, Any]:
+    async def trace_history(trace_id: str, request: Request) -> dict[str, Any]:
+        limit_read(request)
         tid = normalise_trace_id(trace_id)
         cps = await deps.trace.history(tid) if tid else []
         if not cps:
@@ -236,7 +274,7 @@ def app_from_env() -> FastAPI:
     trace = TraceService(hub, trace_db, follower)
     relay = TraceRelay(cfg.brokers)
     deps = Deps(cfg=cfg, db=db, sim_clock=follower, pool=pool, agent=agent, golden=tuple(golden),
-                rides=rides, trace=trace)
+                rides=rides, trace=trace, out=out, relay=relay)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

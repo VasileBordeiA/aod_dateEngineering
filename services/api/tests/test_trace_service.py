@@ -103,6 +103,38 @@ async def test_follow_closes_at_the_max_duration():
 
 
 @pytest.mark.anyio
+async def test_follow_catches_up_on_stages_the_relay_missed():
+    # the relay was rejoining while `ingested` and `stored` went by: only ClickHouse has them
+    t0, t1, t2, t3 = (f"2026-10-16T10:31:0{i}.000+00:00" for i in range(6, 10))
+    db = FakeTraceDb({"taxi.trace_events": ch_rows(("submitted", 1, t0))})
+    s, hub = svc(db, refresh_after_s=0.05, after_terminal_s=0.05)
+    rearmed: list[str] = []
+    hub.on_stored = lambda c: rearmed.append(c["stage"])
+    ws = FakeWs()
+    task = asyncio.create_task(s.follow(ws, TID))
+    await asyncio.sleep(0.01)
+    db.results["taxi.trace_events"] = ch_rows(("submitted", 1, t0), ("ingested", 2, t1), ("stored", 6, t2))
+    await asyncio.sleep(0.1)
+    db.results["taxi.trace_events"] = ch_rows(("submitted", 1, t0), ("ingested", 2, t1), ("stored", 6, t2),
+                                              ("queryable", 7, t3))
+    await asyncio.wait_for(task, 1)
+    assert [c["stage"] for c in ws.sent[0]["checkpoints"]] == ["submitted"]
+    assert [(m["type"], m["stage"]) for m in ws.sent[1:]] == [("checkpoint", "ingested"), ("checkpoint", "stored"),
+                                                              ("checkpoint", "queryable")]
+    assert rearmed == ["stored"]  # the missed `stored` still starts the queryable poll, once
+    assert ws.closed == 1000
+
+
+@pytest.mark.anyio
+async def test_follow_does_not_refresh_after_a_terminal_stage():
+    db = FakeTraceDb({"taxi.trace_events": ch_rows(("submitted", 1, "2026-10-16T10:31:07.000+00:00"),
+                                                   ("rejected", 3, "2026-10-16T10:31:08.000+00:00"))})
+    s, _ = svc(db, refresh_after_s=0.01, after_terminal_s=0.1)
+    await asyncio.wait_for(s.follow(FakeWs(), TID), 1)
+    assert len(db.calls) == 1  # only the initial history read
+
+
+@pytest.mark.anyio
 async def test_live_sends_snapshot_clock_stats_and_flags_ambient():
     db = FakeTraceDb({"countIf(stage = 'submitted')": Result([("rides", "UInt64"), ("rejected", "UInt64")], [[57, 6]], 1),
                       "lagInFrame": Result([("stage", "String"), ("p50_ms", "Float64")], [["ingested", 40.0]], 1)})
@@ -138,8 +170,8 @@ def test_normalise_trace_id():
     assert normalise_trace_id("live") is None and normalise_trace_id("'; DROP TABLE x; --") is None
 
 
-def client(s: TraceService) -> TestClient:
-    return TestClient(create_app(Deps(cfg=make_config(), db=FakeDb(), sim_clock=FakeRideClock(), trace=s)))
+def client(s: TraceService, **env: str) -> TestClient:
+    return TestClient(create_app(Deps(cfg=make_config(**env), db=FakeDb(), sim_clock=FakeRideClock(), trace=s)))
 
 
 def test_ws_route_sends_history_and_rejects_bad_ids():
@@ -186,3 +218,33 @@ def test_uvicorn_can_serve_websockets():
     import importlib.util
 
     assert importlib.util.find_spec("websockets") is not None  # without it uvicorn answers every WS with 404
+
+
+def test_public_reads_share_one_per_ip_limit_and_get_429():
+    from test_rides import service
+
+    s, hub = svc()
+    hub.publish(cp(TID, "submitted", 1))
+    rides, _, _ = service()
+    c = TestClient(create_app(Deps(cfg=make_config(TRACE_READ_RATE_LIMIT_PER_MIN="2"), db=FakeDb(),
+                                   sim_clock=FakeRideClock(), rides=rides, trace=s)))
+    est = c.get("/api/rides/estimate", params={"pickup_location_id": 230, "dropoff_location_id": 132})
+    assert est.status_code == 200
+    assert c.get(f"/api/trace/{TID}").status_code == 200
+    r = c.get(f"/api/trace/{TID}")  # the third read from this IP within the minute
+    assert r.status_code == 429 and int(r.headers["Retry-After"]) > 0
+    assert r.json() == {"detail": "Too many requests, try again in a few seconds",
+                        "retry_after_s": int(r.headers["Retry-After"])}
+    assert c.get("/api/rides/estimate", params={"pickup_location_id": 230, "dropoff_location_id": 132}).status_code == 429
+
+
+def test_websocket_over_the_read_limit_is_closed_with_1013():
+    s, _ = svc(follow_max_s=0.05)
+    c = client(s, TRACE_READ_RATE_LIMIT_PER_MIN="1")
+    with c.websocket_connect(f"/api/trace/{TID}") as ws:
+        assert ws.receive_json()["type"] == "history"
+    for path in (f"/api/trace/{TID}", "/api/trace/live"):
+        with pytest.raises(WebSocketDisconnect) as e:
+            with c.websocket_connect(path) as ws:
+                ws.receive_json()
+        assert e.value.code == 1013  # "try again later": the web client reconnects with a back-off

@@ -21,3 +21,36 @@ def test_relay_consumer_settings():
     c = consumer_config("redpanda:9092")
     assert c["auto.offset.reset"] == "latest" and c["enable.auto.commit"] is False
     assert c["group.id"].startswith("api-relay-") and c["fetch.wait.max.ms"] <= 50
+
+
+def test_an_unexpected_error_does_not_kill_the_relay(monkeypatch, capsys):
+    relay = TraceRelay("unused:9092")
+    calls: list[int] = []
+
+    def consume() -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            raise ValueError("a bug, not a KafkaException")
+        relay.stop()
+
+    monkeypatch.setattr(relay, "_consume", consume)
+    monkeypatch.setattr(relay._stop, "wait", lambda timeout=None: False)  # skip the 2 s back-off
+    relay._run()
+    assert len(calls) == 2  # it retried after the error
+    out = capsys.readouterr().out
+    assert '"event": "trace_relay_error"' in out and '"error": "ValueError"' in out
+
+
+def test_consumer_errors_are_logged_at_most_every_30_s(capsys):
+    t = [0.0]
+    relay = TraceRelay("unused:9092", clock=lambda: t[0])
+    relay.log_error("Broker: transport failure")
+    t[0] = 10.0
+    relay.log_error("Broker: transport failure")
+    t[0] = 31.0
+    relay.log_error("Broker: transport failure")
+    assert capsys.readouterr().out.count('"event": "trace_relay_error"') == 2
+
+
+def test_alive_is_false_until_started():
+    assert TraceRelay("unused:9092").alive is False
