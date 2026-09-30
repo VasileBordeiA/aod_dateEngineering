@@ -59,6 +59,16 @@ test("Book ride waits for both zones", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Book ride" })).toBeDisabled();
 });
 
+test("Escape closes the zone picker and focus returns to its button", async ({ page }) => {
+  await mockRideApi(page);
+  await page.goto("/ride");
+  await page.getByRole("button", { name: "Pickup zone" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Pickup zone" })).toBeFocused();
+});
+
 test("reopening /ride offers to continue watching the last ride", async ({ page }) => {
   await mockRideApi(page);
   await page.addInitScript((id) => localStorage.setItem("nyc-taxi-live:last-trace", id), TID);
