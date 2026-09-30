@@ -6,6 +6,7 @@ import pytest
 
 from api.db import Result
 from api.envconfig import Config
+from api.kafka import Delivery, KafkaDeliveryError
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "contracts"))
@@ -61,6 +62,34 @@ class FakeTraceDb:
             if needle in sql:
                 return result
         return Result(columns=[], rows=[], elapsed_ms=1)  # "nothing found", like an empty table
+
+
+class FakeOut:
+    """Records every produced message in order; `fail` makes send() raise like a broker that never acked."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, dict[str, Any]]] = []
+        self.fail = False
+        self.offset = 482112
+
+    async def send(self, topic: str, key: str, value: dict[str, Any]) -> Delivery:
+        if self.fail:
+            raise KafkaDeliveryError("Local: Message timed out")
+        self.sent.append((topic, key, value))
+        self.offset += 1
+        return Delivery(0, self.offset)
+
+    def send_nowait(self, topic: str, key: str, value: dict[str, Any]) -> None:
+        self.sent.append((topic, key, value))
+
+
+class FakeRideClock:
+    def __init__(self, sim_ts: str | None = "2025-10-09T17:42:00.250") -> None:
+        self.sim_ts = sim_ts
+        self.latest: dict[str, Any] | None = {"sim_ts": sim_ts} if sim_ts else None
+
+    def fresh_sim_ts(self, max_age_s: float = 10.0) -> str | None:
+        return self.sim_ts
 
 
 @pytest.fixture

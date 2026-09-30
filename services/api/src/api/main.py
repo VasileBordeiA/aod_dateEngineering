@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from agent.catalog import Catalog
 from agent.golden import load_golden, suggestions
@@ -20,6 +23,7 @@ from agent.service import AgentService, AskRequest
 from api.db import ClickHouseDb, Db, DbError, DbUnavailable
 from api.envconfig import Config
 from api.simclock import SimClockFollower
+from rides.service import RideRejected, RideRequest
 
 
 class SimClockSource(Protocol):
@@ -34,6 +38,8 @@ class Deps:
     pool: Any = None  # agent.providers.ProviderPool (Task 5)
     agent: Any = None  # agent.service.AgentService (Task 7)
     golden: tuple[Any, ...] = ()  # agent.golden.GoldenQuestion (Task 3)
+    rides: Any = None  # rides.service.RideService (Task 3)
+    trace: Any = None  # rides.hub.Hub (Task 4)
 
 
 class OrderBody(BaseModel):
@@ -54,6 +60,30 @@ class AskBody(BaseModel):
         return v
 
 
+class RideBody(BaseModel):
+    pickup_location_id: int = Field(ge=1, le=263)
+    dropoff_location_id: int = Field(ge=1, le=263)
+    payment: Literal["card", "cash"]
+    tip_amount: float = Field(ge=0, le=999)  # absurd tips are allowed on purpose: the processor rejects them
+    passenger_count: int = Field(ge=1, le=6)
+
+    @field_validator("pickup_location_id", "dropoff_location_id", "passenger_count", mode="before")
+    @classmethod
+    def whole_number(cls, v: Any, info: ValidationInfo) -> Any:
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"{info.field_name} must be a whole number")
+        return v
+
+    @field_validator("tip_amount", mode="before")
+    @classmethod
+    def money(cls, v: Any) -> Any:
+        if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+            raise ValueError("tip_amount must be a number")
+        if abs(round(v, 2) - v) > 1e-9:
+            raise ValueError("tip_amount has at most 2 decimals")
+        return v
+
+
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
 
@@ -64,6 +94,22 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
     @app.exception_handler(DbUnavailable)
     async def db_down(_: Request, __: DbUnavailable) -> JSONResponse:
         return JSONResponse({"detail": "The database is restarting, try again in a moment."}, status_code=503)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_body(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # A NaN/Infinity in the body reaches here as a raw non-finite float in `errors()[i]["input"]`, and the
+        # standard-library json encoder rejects it (allow_nan=False), so it must be sanitised before it is encoded.
+        sane = jsonable_encoder(exc.errors(), custom_encoder={float: lambda v: v if math.isfinite(v) else None})
+        return JSONResponse({"detail": sane}, status_code=422)
+
+    @app.exception_handler(RideRejected)
+    async def ride_rejected(_: Request, exc: RideRejected) -> JSONResponse:
+        body: dict[str, Any] = {"detail": exc.message}
+        headers: dict[str, str] = {}
+        if exc.retry_after_s is not None:
+            body["retry_after_s"] = exc.retry_after_s
+            headers["Retry-After"] = str(exc.retry_after_s)
+        return JSONResponse(body, status_code=exc.status, headers=headers)
 
     @app.get("/api/healthz")
     async def healthz() -> dict[str, Any]:
@@ -89,6 +135,22 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
         if deps.sim_clock.latest is None:
             raise HTTPException(503, "The sim clock hasn't been received yet.")
         return deps.sim_clock.latest
+
+    @app.get("/api/rides/estimate")
+    async def ride_estimate(pickup_location_id: int = Query(ge=1, le=263),
+                            dropoff_location_id: int = Query(ge=1, le=263)) -> dict[str, Any]:
+        est = await deps.rides.estimate(pickup_location_id, dropoff_location_id)
+        return {"trip_distance": est.trip_distance, "duration_min": est.duration_min,
+                "fare_amount": est.fare_amount, "method": est.method}
+
+    @app.post("/api/rides", status_code=201)
+    async def create_ride(body: RideBody, request: Request) -> dict[str, Any]:
+        # uvicorn --proxy-headers: the host comes from X-Forwarded-For. It's only a rate-limit key, never logged.
+        client_ip = request.client.host if request.client else "unknown"
+        req = RideRequest(body.pickup_location_id, body.dropoff_location_id, body.payment, round(body.tip_amount, 2),
+                          body.passenger_count)
+        result: dict[str, Any] = await deps.rides.create(req, client_ip)
+        return result
 
     @app.get("/api/llm/status")
     async def llm_status() -> dict[str, Any]:
