@@ -94,7 +94,8 @@ erDiagram
 | Consumer | User | Access |
 |---|---|---|
 | processor sinks, api (`agent_log` insert) | `ingest_writer` | INSERT on `taxi.trips`, `taxi.trips_rejected`, `taxi.agg_borough_minute`, `taxi.agent_log` |
-| agent (`run_query`, `describe_table`), api (`queryable` poll, fare estimate) | `agent_ro` | SELECT on the agent whitelist (below), `readonly=1`, hard limits |
+| agent (`run_query`, `describe_table`) | `agent_ro` | SELECT on the agent whitelist (below), `readonly=1`, hard limits, `agent` quota (120 queries/min) |
+| api's own reads: `GET /api/rides/estimate`, the queryable poll, trace history, wall stats | `trace_ro` (ADR-019) | Same profile and SELECT grants as `agent_ro`, but its own `trace` quota (1 200 queries/min), so polling never competes with the agent's budget |
 | Grafana (public dashboards) | `grafana_ro` | SELECT on the dashboard tables (`trips`, `trips_rejected`, `agg_borough_minute`, `zones`, `sim_now`, `trace_events`). **Not** `agent_log` or any `system.*` table: anonymous viewers can send arbitrary SQL through Grafana's query API. `readonly=2` + constraints + the `grafana` quota |
 | Stand Health (operator-only `grafana-ops`, ADR-017) | `grafana_ops` | SELECT on `trips`, `trips_rejected`, `agg_borough_minute`, `sim_now`, `trace_events`, `agent_log`, `system.parts`, `system.query_log`. Same `grafana` profile and quota |
 | operators (make, migrations) | `admin` (from `CLICKHOUSE_ADMIN_PASSWORD`) | all, localhost only |
@@ -102,7 +103,7 @@ erDiagram
 **Agent whitelist:** `taxi.trips`, `taxi.trips_rejected`, `taxi.agg_borough_minute`, `taxi.zones`, `taxi.sim_now`, `taxi.trace_events`. `taxi.agent_log` is **not** on the list, because it holds other visitors' questions.
 
 ## Config
-`CLICKHOUSE_DB`, `CLICKHOUSE_ADMIN_PASSWORD`, `CLICKHOUSE_INGEST_PASSWORD`, `CLICKHOUSE_AGENT_PASSWORD`, `CLICKHOUSE_GRAFANA_PASSWORD`, `CLICKHOUSE_OPS_PASSWORD`. Passwords are injected into the users XML with `from_env`.
+`CLICKHOUSE_DB`, `CLICKHOUSE_ADMIN_PASSWORD`, `CLICKHOUSE_INGEST_PASSWORD`, `CLICKHOUSE_AGENT_PASSWORD`, `CLICKHOUSE_TRACE_PASSWORD` (ADR-019), `CLICKHOUSE_GRAFANA_PASSWORD`, `CLICKHOUSE_OPS_PASSWORD`. Passwords are injected into the users XML with `from_env`.
 
 ## Behaviour
 
@@ -329,6 +330,9 @@ COMMENT 'Operator-only log of agent questions. NOT visible to the agent.';
     <agent>
       <interval><duration>60</duration><queries>120</queries><errors>60</errors><execution_time>120</execution_time></interval>
     </agent>
+    <trace>  <!-- ADR-019: the api's own polls/estimates never compete with the agent's 120/min -->
+      <interval><duration>60</duration><queries>1200</queries><errors>600</errors><execution_time>120</execution_time></interval>
+    </trace>
   </quotas>
   <users>
     <ingest_writer>
@@ -355,6 +359,22 @@ COMMENT 'Operator-only log of agent questions. NOT visible to the agent.';
         <query>GRANT SELECT ON taxi.trace_events</query>
       </grants>
     </agent_ro>
+    <!-- ADR-019: the api's own fixed, parameterised reads (estimates, the queryable poller, trace history, wall
+         stats). Same profile and grants as agent_ro, so "visible to trace_ro" = "visible to the agent", but its
+         own quota, so a 50-ride burst never eats into the agent's 120 queries/min. -->
+    <trace_ro>
+      <password from_env="CLICKHOUSE_TRACE_PASSWORD"/>
+      <profile>agent</profile><quota>trace</quota>
+      <networks><ip>::/0</ip></networks>
+      <grants>
+        <query>GRANT SELECT ON taxi.trips</query>
+        <query>GRANT SELECT ON taxi.trips_rejected</query>
+        <query>GRANT SELECT ON taxi.agg_borough_minute</query>
+        <query>GRANT SELECT ON taxi.zones</query>
+        <query>GRANT SELECT ON taxi.sim_now</query>
+        <query>GRANT SELECT ON taxi.trace_events</query>
+      </grants>
+    </trace_ro>
     <grafana_ro>
       <password from_env="CLICKHOUSE_GRAFANA_PASSWORD"/>
       <profile>grafana</profile><quota>grafana</quota>

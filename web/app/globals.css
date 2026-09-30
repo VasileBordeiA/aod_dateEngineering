@@ -40,3 +40,23 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .step-in, .animate-pulse { animation: none; }
 }
+
+/* Phone pages (/ride, /trace/[id]) wrap their content in .phone: 16 px base instead of the kiosk's 20 px (spec 08). */
+html:has(.phone) { font-size: 16px; }
+
+/* The packet dot travelling to the next stage card, and the "waiting for…" spinner. */
+@keyframes packet {
+  from { transform: translateY(-0.75rem); opacity: 0; }
+  50% { opacity: 1; }
+  to { transform: translateY(0.75rem); opacity: 0; }
+}
+.packet { animation: packet 900ms ease-in-out infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block; width: 1rem; height: 1rem; border-radius: 9999px;
+  border: 2px solid currentColor; border-right-color: transparent; animation: spin 800ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .packet { animation: none; opacity: 1; transform: none; }
+  .spinner { animation: none; }
+}

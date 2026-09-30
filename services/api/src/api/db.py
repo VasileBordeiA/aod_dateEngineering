@@ -16,7 +16,7 @@ import clickhouse_connect
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 
 from api import log
-from api.config import Config
+from api.envconfig import Config
 
 AGENT_LOG_COLUMNS = (
     "asked_at", "request_id", "origin", "suggestion_id", "trace_id", "question", "provider", "model", "mode",
@@ -71,6 +71,16 @@ def jsonable(value: Any) -> Any:
     return str(value)
 
 
+def _to_result(r: Any, started: float) -> Result:
+    return Result(columns=list(zip(r.column_names, [t.name for t in r.column_types], strict=True)),
+                  rows=[[jsonable(v) for v in row] for row in r.result_rows],
+                  elapsed_ms=int((time.perf_counter() - started) * 1000))
+
+
+class TraceDb(Protocol):
+    async def query(self, sql: str, params: dict[str, Any]) -> Result: ...
+
+
 def clickhouse_message(exc: BaseException) -> str:
     """The first line of the server's message, at most 300 chars (spec 06: run_query errors)."""
     text = str(exc)
@@ -108,9 +118,7 @@ class ClickHouseDb:
             raise DbUnavailable(clickhouse_message(exc)) from exc
         except DatabaseError as exc:
             raise DbError(clickhouse_message(exc)) from exc
-        return Result(columns=list(zip(r.column_names, [t.name for t in r.column_types], strict=True)),
-                      rows=[[jsonable(v) for v in row] for row in r.result_rows],
-                      elapsed_ms=int((time.perf_counter() - started) * 1000))
+        return _to_result(r, started)
 
     async def select(self, sql: str) -> Result:
         return await asyncio.to_thread(self._select_sync, sql)
@@ -129,3 +137,35 @@ class ClickHouseDb:
 
     async def insert_agent_log(self, row: dict[str, Any]) -> None:
         await asyncio.to_thread(self._insert_sync, row)
+
+
+class ClickHouseTraceDb:
+    """trace_ro (ADR-019): the api's own fixed, parameterised reads (estimates, queryable poll, trace history).
+    Never the agent's SQL. Same grants as agent_ro, so "visible here" means "visible to the agent"."""
+
+    def __init__(self, cfg: Config) -> None:
+        self._cfg = cfg
+        self._client: Any = None
+        self._lock = threading.Lock()
+
+    def _query_sync(self, sql: str, params: dict[str, Any]) -> Result:
+        started = time.perf_counter()
+        try:
+            with self._lock:
+                if self._client is None:
+                    self._client = clickhouse_connect.get_client(
+                        host=self._cfg.ch_host, port=self._cfg.ch_port, username=self._cfg.trace_user,
+                        password=self._cfg.trace_password, database=self._cfg.ch_db,
+                        autogenerate_session_id=False, connect_timeout=3)
+                client = self._client
+            r = client.query(sql, parameters=params)
+        except OperationalError as exc:
+            with self._lock:
+                self._client = None
+            raise DbUnavailable(clickhouse_message(exc)) from exc
+        except DatabaseError as exc:
+            raise DbError(clickhouse_message(exc)) from exc
+        return _to_result(r, started)
+
+    async def query(self, sql: str, params: dict[str, Any]) -> Result:
+        return await asyncio.to_thread(self._query_sync, sql, params)

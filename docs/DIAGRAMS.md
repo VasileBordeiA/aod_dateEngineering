@@ -174,10 +174,9 @@ sequenceDiagram
     P->>W: scan QR, pick zones + tip
     W->>API: POST /api/rides
     API->>API: estimate distance/fare, pickup_ts = sim clock
-    API->>RP: trace.checkpoints: submitted
     API->>RP: trips.raw (key = trip_id)
     RP-->>API: delivery ack (partition, offset)
-    API->>RP: trace.checkpoints: ingested
+    API->>RP: trace.checkpoints: submitted + ingested
     API-->>W: 201 {trace_id}
     W->>API: WS /api/trace/{trace_id}
     API-->>W: replay history so far
@@ -189,7 +188,7 @@ sequenceDiagram
     PR->>RP: stored
     RP->>API: relay consumes trace.checkpoints
     API-->>W: push each checkpoint (WS)
-    API->>CH: poll SELECT 1 WHERE trace_id = ? (agent_ro)
+    API->>CH: batched poll: DISTINCT trace_id IN pending ids (trace_ro)
     API->>RP: queryable
     API-->>W: push queryable
     W->>P: "Ask the agent where your ride ranks"

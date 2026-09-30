@@ -1,41 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
 import { getLlmStatus, getSimClock, type LlmStatus } from "@/lib/api";
+import { formatSim } from "@/lib/format";
+import { usePoll } from "@/lib/use-poll";
 
 const BADGE: Record<string, { label: string; className: string; dot: string }> = {
   local: { label: "local model", className: "bg-visitor-fill text-visitor-ink border-visitor", dot: "bg-visitor" },
   internal: { label: "company AI", className: "bg-[#0d3a66] text-[#dcecff] border-[#3987e5]", dot: "bg-[#3987e5]" },
   cache: { label: "cached answers only", className: "bg-[#4a3300] text-[#ffe7b0] border-amber", dot: "bg-amber" },
 };
-
-/** Sim time is naive NYC local: format it as-is, never convert it (ARCHITECTURE §4). */
-export function formatSim(ts: string): string {
-  const d = new Date(`${ts.slice(0, 19)}Z`);
-  const f = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
-  const p = Object.fromEntries(f.formatToParts(d).map((x) => [x.type, x.value]));
-  return `${p.weekday} ${p.day} ${p.month} ${p.hour}:${p.minute}`;
-}
-
-function usePoll<T>(load: () => Promise<T>, everyMs: number): T | null {
-  const [value, setValue] = useState<T | null>(null);
-  useEffect(() => {
-    let alive = true;
-    const tick = () => {
-      load()
-        .then((v) => {
-          if (alive) setValue(v);
-        })
-        .catch(() => undefined);
-    };
-    tick();
-    const id = setInterval(tick, everyMs);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, [load, everyMs]);
-  return value;
-}
 
 export function Header() {
   const clock = usePoll(getSimClock, 5000);

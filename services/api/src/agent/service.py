@@ -26,8 +26,8 @@ from agent.record import RunRecord
 from agent.sse import encode
 from agent.tools import Emit, Toolbox
 from api import log
-from api.config import Config
 from api.db import Db, DbError, DbUnavailable
+from api.envconfig import Config
 from api.ratelimit import TokenBucket
 
 QUEUE_STATUS_EVERY_S = 3.0

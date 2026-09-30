@@ -181,3 +181,32 @@ test("events from a replaced stream never reach the new question", async ({ page
   await expect(page.getByTestId("answer")).toContainText("Answer for question B.");
   await expect(sql).not.toContainText("attempt 2");
 });
+
+const RIDE_TID = "3f2c9a1e-8b7d-4c21-9e55-0a1b2c3d4e5f";
+const RIDE_SUBMITTED = {
+  trace_id: RIDE_TID, trip_id: `s-${RIDE_TID}`, source: "student", stage: "submitted", seq: 1, service: "api",
+  at: "2026-10-16T10:31:07.000Z",
+  detail: { pickup_zone: "Midtown Center", dropoff_zone: "JFK Airport", payment: "card", tip_amount: 5, fare_amount: 70.5 },
+};
+
+test("the ride hand-off shows the ride chip and asks with the ride context", async ({ page }) => {
+  await mockApi(page, FIXTURE);
+  await page.route(`**/api/trace/${RIDE_TID}`, (r) => r.fulfill({ json: { trace_id: RIDE_TID, checkpoints: [RIDE_SUBMITTED] } }));
+  let body: unknown;
+  await page.route("**/api/agent/ask", async (r) => {
+    body = r.request().postDataJSON();
+    await r.fulfill({ status: 200, contentType: "text/event-stream", body: FIXTURE });
+  });
+  await page.goto(`/agent?trace_id=${RIDE_TID}&suggestion=ride_rank`);
+  await expect(page.getByTestId("ride-chip")).toHaveText("Your ride: Midtown Center → JFK Airport, $5 tip");
+  await page.getByTestId("ride-prompt").getByRole("button", { name: "Where does my ride rank for tips today?" }).click();
+  await expect(page.getByTestId("answer")).toBeVisible();
+  expect(body).toEqual({ question: "Where does my ride rank for tips today?", origin: "ride", trace_id: RIDE_TID });
+});
+
+test("a malformed ride id is ignored: no prompt, normal kiosk", async ({ page }) => {
+  await mockApi(page, FIXTURE);
+  await page.goto("/agent?trace_id=not-a-uuid&suggestion=ride_rank");
+  await expect(page.getByRole("button", { name: "Which borough has the best tippers?" })).toBeVisible();
+  await expect(page.getByTestId("ride-prompt")).toHaveCount(0);
+});

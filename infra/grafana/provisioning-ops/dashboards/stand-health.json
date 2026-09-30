@@ -995,6 +995,146 @@
           "show": false
         }
       }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Visitor rides today",
+      "description": "Rides booked on /ride since midnight (wall clock, the event day). Info only.",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- Wall-clock day: the event day, not the sim day.\nSELECT countIf(stage = 'submitted') AS rides\nFROM taxi.trace_events\nWHERE source = 'student' AND at >= toStartOfDay(now64(3))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#1D9E75",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Visitor ride p95 · phone → queryable (last 60 min)",
+      "description": "submitted → queryable per student ride, wall clock. Red above 5 s (the M4 exit bar).",
+      "gridPos": {
+        "x": 6,
+        "y": 26,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-ops"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-ops"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "-- Wall clock only (at): from the phone's request to the row being visible to the agent.\nSELECT quantile(0.95)(ms) AS p95_ms\nFROM\n(\n    SELECT trace_id, dateDiff('millisecond', minIf(at, stage = 'submitted'), minIf(at, stage = 'queryable')) AS ms\n    FROM taxi.trace_events\n    WHERE source = 'student' AND at >= now64(3) - INTERVAL 60 MINUTE\n    GROUP BY trace_id\n    HAVING countIf(stage = 'submitted') > 0 AND countIf(stage = 'queryable') > 0\n)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#0ca30c",
+                "value": null
+              },
+              {
+                "color": "#d03b3b",
+                "value": 5000
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 40,
+          "titleSize": 16
+        }
+      }
     }
   ]
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-PROMPT_VERSION = "2026-09-28.1"
+PROMPT_VERSION = "2026-09-30.1"
 
 SYSTEM_PROMPT = """\
 You are the data agent at the "NYC Taxi Live" stand. Visitors are university students.
@@ -27,9 +27,19 @@ Rules:
 
 
 def ride_context(trace_id: str) -> str:
+    """Spec 07 §Hand-off: how to find the ride, what "rank for tips today" means, and the cash caveat."""
+    ride = f"FROM taxi.trips WHERE trace_id = '{trace_id}'"
     return (
         f"The visitor asking this question created their own ride: trace_id = '{trace_id}'. "
-        f"You can find it with WHERE trace_id = '{trace_id}'."
+        f"You can find it with WHERE trace_id = '{trace_id}'. "
+        "Its rank for tips today is its position by tip_pct among today's card trips: answer as \"rank N of M\" "
+        "and \"better than X %\", where N = my_rank, M = card_trips and X = pct_tipped_less exactly as returned "
+        "(never work X out from N and M). Rank it with this query: "
+        f"WITH (SELECT any(tip_pct) {ride}) AS my_tip, (SELECT any(payment_type_name) {ride}) AS my_payment "
+        "SELECT my_payment, my_tip, countIf(tip_pct > my_tip) + 1 AS my_rank, count() AS card_trips, "
+        "round(100 * countIf(tip_pct < my_tip) / count(), 1) AS pct_tipped_less FROM taxi.trips "
+        "WHERE is_card AND tip_pct IS NOT NULL AND toDate(pickup_ts) = (SELECT today FROM taxi.sim_now). "
+        "If my_payment is 'Cash', do not rank: NYC taxi data doesn't record cash tips, so explain that instead."
     )
 
 

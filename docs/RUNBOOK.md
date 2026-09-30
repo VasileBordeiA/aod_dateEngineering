@@ -19,6 +19,7 @@ Everything the operator types is a `make` target. **Don't improvise commands at 
   - the QR card: ① join Wi-Fi `NYC-Taxi-Live`, ② open `http://192.168.8.10/ride`.
 - [ ] 10-hour soak passed on **the event laptop** (spec 10). Report committed.
 - [ ] Fallback video recorded (3 min: dashboard → agent question → ride trace).
+- [ ] **Real-IP check**, so rate limiting protects the laptop rather than one phone's neighbours (see the procedure in §3 step 5 below). Do this once now, away from the venue, so there's time to fix `.env` if Docker Desktop is hiding phones' real IPs.
 
 ## 2. The evening before (at home, with internet)
 ```bash
@@ -64,6 +65,10 @@ make down                            # volumes keep everything
    ```
 5. **Phone test:** join `NYC-Taxi-Live`, scan the QR code, book a ride, and watch all 7 stages. Ask "Where does my ride rank for tips today?"
 6. Press each of the 5 suggestion buttons once. This warms the model and checks for 5 answers.
+7. **The real-IP check**, once, before opening:
+   1. From phone A on the stand Wi-Fi, book 4 rides within a minute. The 4th must say "You've booked 3 rides this minute…".
+   2. Right away, book one from phone B. It must succeed.
+   3. If phone B is also refused, Docker Desktop is hiding the phones' real IPs (they all share one address behind NAT). Set `RIDES_RATE_LIMIT_PER_MIN=1000`, `AGENT_RATE_LIMIT_PER_MIN=1000` and `TRACE_READ_RATE_LIMIT_PER_MIN=10000` in `.env` and run `make up`. These are far above the global caps on purpose: every phone now shares one address, so a per-IP limit would throttle the whole room at once, and only the global caps (30 rides/min, the agent's concurrency and queue, the ClickHouse quotas) should apply. Record which case happened, in the packing/setup notes for the day.
 
 ### What `make preflight` checks (all must be ✅)
 | Check | Pass condition |
@@ -85,6 +90,7 @@ make down                            # volumes keep everything
 - If the replayer reaches the end of the month, it loops by itself: the sim clock jumps about 4 days forward, to the same weekday 5 weeks later. The dashboard shows a date jump, and that's expected. You don't need to do anything.
 - Avoid pausing the replayer during visits. The dashboard freezes.
 - A crowd arrives after a lecture: point them to the QR card. The rate limits protect the laptop. When the queue is long, the agent says "You're next in line…", which is expected.
+- `make reset-rides` clears visitor rides (asks for confirmation first) — for example, to give a second session (a new class arriving) a clean "rides today" count on Stand Health and the dashboard.
 
 ## 5. Recovery playbook
 | Symptom | Likely cause | Action |
@@ -97,7 +103,8 @@ make down                            # volumes keep everything
 | Agent answers wrong | It happens | **Use it**: "Let's read the SQL. What did it misunderstand?" Then press a suggestion |
 | Phones can't open the ride page | Wrong Wi-Fi, or firewall | Check that the phone is on `NYC-Taxi-Live`. `curl http://192.168.8.10/ride` from the laptop. Check the macOS firewall allows Docker |
 | Router dead | Hardware | Fallback: phone hotspot (≤ 10 clients). Students use `/agent` on the laptop instead |
-| Trace stuck at `ingested` | Processor down | See "Freshness climbing" above. The trace resumes automatically |
+| A trace stops at `ingested` | The processor is down | `make logs S=processor`, then `docker compose restart processor` if it's crashed (see "Freshness climbing" above). It resumes automatically from its committed offset, with no loss |
+| A trace never reaches `queryable` (stuck at `stored`) | ClickHouse insert lag, or the poll gave up after 10 s | `make logs S=api`, look for `queryable_timeout` for that trace_id. If it's a one-off (ClickHouse briefly slow), reload the trace page — history + the poller re-arm from `taxi.trace_events`. If every ride is timing out, check ClickHouse health ("Dashboard 'No data'" above) |
 | Docker Desktop frozen | It happens on macOS | Quit Docker Desktop fully and reopen, then `make up`. Volumes persist |
 | Laptop dead | n/a | Play the fallback video on the tablet and walk through the printed poster |
 

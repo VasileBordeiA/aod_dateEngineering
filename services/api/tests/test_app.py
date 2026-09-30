@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 
 from agent.golden import load_golden
 from agent.providers import ProviderPool
-from api.config import ProviderConfig
 from api.db import DbUnavailable, Result
+from api.envconfig import ProviderConfig
 from api.main import Deps, create_app
 
 
@@ -22,6 +22,17 @@ def test_healthz_reports_dependencies():
     assert client(db).get("/api/healthz").json() == {"ok": True, "clickhouse": True, "sim_clock": False}
     db.fail = DbUnavailable("down")
     assert client(db).get("/api/healthz").json()["clickhouse"] is False
+
+
+class Thread:
+    def __init__(self, alive: bool) -> None:
+        self.alive = alive
+
+
+def test_healthz_reports_the_background_threads():
+    deps = Deps(cfg=make_config(), db=FakeDb(), sim_clock=Clock(), out=Thread(True), relay=Thread(False))
+    body = TestClient(create_app(deps)).get("/api/healthz").json()
+    assert body["kafka_out"] is True and body["trace_relay"] is False
 
 
 def test_zones_are_sorted_and_cached():

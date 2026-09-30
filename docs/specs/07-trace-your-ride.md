@@ -31,10 +31,9 @@ sequenceDiagram
     P->>W: scan QR, pick zones + tip
     W->>API: POST /api/rides
     API->>API: estimate distance/fare, pickup_ts = sim clock
-    API->>RP: trace.checkpoints: submitted
     API->>RP: trips.raw (key = trip_id)
     RP-->>API: delivery ack (partition, offset)
-    API->>RP: trace.checkpoints: ingested
+    API->>RP: trace.checkpoints: submitted + ingested
     API-->>W: 201 {trace_id}
     W->>API: WS /api/trace/{trace_id}
     API-->>W: replay history so far
@@ -46,7 +45,7 @@ sequenceDiagram
     PR->>RP: stored
     RP->>API: relay consumes trace.checkpoints
     API-->>W: push each checkpoint (WS)
-    API->>CH: poll SELECT 1 WHERE trace_id = ? (agent_ro)
+    API->>CH: batched poll: DISTINCT trace_id IN pending ids (trace_ro)
     API->>RP: queryable
     API-->>W: push queryable
     W->>P: "Ask the agent where your ride ranks"
@@ -83,6 +82,7 @@ stateDiagram-v2
 | `GET /api/zones` | `[{location_id, zone, borough}]` for 1–263, sorted by borough then zone (from `taxi.zones`, cached) |
 | `GET /api/rides/estimate?pickup_location_id=&dropoff_location_id=` | `{trip_distance, duration_min, fare_amount, method}`, the same estimator as below. Used by the form before booking |
 | `POST /api/rides` | Create a ride → `201` (see below) |
+| `GET /api/trace/{trace_id}` | `{trace_id, checkpoints}` — the merged history (memory ∪ `taxi.trace_events`) as a one-shot fetch, for a page that doesn't need the live WS (or a reload before the WS reconnects). `404` if there's no such trace |
 | `WS /api/trace/{trace_id}` | History + live checkpoints for one ride |
 | `WS /api/trace/live` | All student checkpoints + sampled replay checkpoints + a 1 Hz sim clock (the big-screen wall) |
 | `GET /api/sim/clock` | Latest `sim.clock` message |
@@ -113,10 +113,12 @@ Response `201`:
 ```
 `notes` contains "NYC taxi data doesn't record cash tips, so your tip will show as $0" when `payment = "cash"`.
 
-Errors: `429` for the rate limit (`RIDES_RATE_LIMIT_PER_MIN` per IP, plus a global 30/min: "The dispatcher is busy, try again in a few seconds"). `503` if the broker doesn't acknowledge within 2 s.
+Errors: `429` for the rate limit (`RIDES_RATE_LIMIT_PER_MIN` per IP, plus a global 30/min: "The dispatcher is busy, try again in a few seconds"). `503` if the broker doesn't acknowledge within 2 s, and `503` "The zone list is still loading, try again in a moment" if the zone list isn't cached yet and ClickHouse refuses the query.
+
+**Public reads.** `GET /api/rides/estimate`, `GET /api/trace/{id}` and each `WS /api/trace/{id}` or `/api/trace/live` connect share one per-IP token bucket of `TRACE_READ_RATE_LIMIT_PER_MIN` (default 120), because they use the same `trace_ro` quota as the queryable poller. Over the limit, a GET gets `429` `{"detail": "Too many requests, try again in a few seconds", "retry_after_s": n}` with a `Retry-After` header, and a WebSocket is accepted and then closed with code `1013` (the web client reconnects with its back-off).
 
 ## Config
-`RIDES_RATE_LIMIT_PER_MIN`, `TRACE_HISTORY_TTL_S`, `TRACE_QUERYABLE_POLL_MS`, `KAFKA_BROKERS`, `CLICKHOUSE_AGENT_*`, `STAND_PUBLIC_URL`.
+`RIDES_RATE_LIMIT_PER_MIN`, `RIDES_GLOBAL_PER_MIN`, `TRACE_READ_RATE_LIMIT_PER_MIN`, `TRACE_HISTORY_TTL_S`, `TRACE_QUERYABLE_POLL_MS`, `KAFKA_BROKERS`, `CLICKHOUSE_AGENT_*`, `CLICKHOUSE_TRACE_USER`, `CLICKHOUSE_TRACE_PASSWORD`, `STAND_PUBLIC_URL`.
 
 ## Behaviour
 
@@ -135,7 +137,7 @@ Errors: `429` for the rate limit (`RIDES_RATE_LIMIT_PER_MIN` per IP, plus a glob
    FROM taxi.trips
    WHERE source = 'replay' AND pu_location_id = {pu:UInt16} AND do_location_id = {do:UInt16}
    ```
-   This is a parameterised query as `agent_ro`. If `n < 5`, fall back to the centroid haversine: `distance = max(0.5, 1.3 × haversine_miles)`, `duration = distance / 12 mph × 60 + 3`, `fare = 3.00 + 3.50 × distance + 0.30 × duration`. The method string says which one was used.
+   This is a parameterised query as `trace_ro` (ADR-019). If `n < 5`, fall back to the centroid haversine: `distance = max(0.5, 1.3 × haversine_miles)` (2.5 mi typical-trip fallback when either zone has no centroid, e.g. 264/265), `duration = distance / 12 mph × 60 + 3`, `fare = 3.00 + 3.50 × distance + 0.30 × duration`. The method string says which one was used. Either way, the final estimate is floored so a ride is never rejected for its distance/duration/fare alone: `trip_distance ≥ 0.1 mi`, `duration_min ≥ 1 min`, `fare_amount ≥ $3`.
 4. **Amounts:**
    - `mta_tax` 0.50 and `improvement_surcharge` 1.00.
    - `congestion_surcharge` 2.50 and `cbd_congestion_fee` 0.75 if either zone's `service_zone = 'Yellow Zone'`.
@@ -143,16 +145,18 @@ Errors: `429` for the rate limit (`RIDES_RATE_LIMIT_PER_MIN` per IP, plus a glob
    - `tip_amount` = the input if card, **0 if cash**. `payment_type` is 1 (card) or 2 (cash). `ratecode_id` is 1.
    - `total_amount` = the sum of all of the above.
    - `dropoff_ts = pickup_ts + duration`.
-5. Produce `submitted` (seq 1) to `trace.checkpoints`, key `trace_id`.
-6. Produce the trip to `trips.raw` (key `trip_id`, and it must validate against `trip.schema.json`). Wait for the delivery report (≤ 2 s).
+5. Produce the trip to `trips.raw` (key `trip_id`, and it must validate against `trip.schema.json`). Wait for the delivery report (≤ 2 s).
+6. Produce `submitted` (seq 1) to `trace.checkpoints`, key `trace_id`, with `at` = the moment the request was accepted (captured when the request is accepted, before the estimate and the broker round trip).
 7. Produce `ingested` (seq 2) with `{topic, partition, offset}` and return `201`.
+
+`submitted` goes out only after the `trips.raw` ack, so a broker failure never leaves a dangling `submitted` with nothing after it; its `at` still reflects the true request-acceptance time (not the delayed emit), and the viewer's strict `seq` ordering (not arrival order) keeps stage order correct either way.
 
 The fare estimator and amount calculation are pure functions (TDD).
 
 ### Checkpoint catalogue (all emitters)
 | Stage | seq | Service | Emitted when | `detail` keys | Student-facing copy (shown in the viewer) |
 |---|---|---|---|---|---|
-| `submitted` | 1 | api | request accepted | `pickup_zone, dropoff_zone, payment, tip_amount, estimate_method` | "Your phone sent the ride to our API." |
+| `submitted` | 1 | api | request accepted (emitted after the `trips.raw` ack, `at` = acceptance time) | `pickup_zone, dropoff_zone, payment, tip_amount, fare_amount, estimate_method` | "Your phone sent the ride to our API." |
 | `ingested` | 2 | api / replayer | broker acknowledged | `topic, partition, offset` | "Safely stored in Redpanda: topic `trips.raw`, partition {p}, offset {o}. It can't get lost now." |
 | `validated` | 3 | processor | all rules passed | `rules_checked` | "The stream processor checked {n} data-quality rules. All passed ✓" |
 | `rejected` | 3 | processor | a rule failed (terminal) | `reasons[]` | "Rejected: {reason}. Our pipeline rejects about 1 in 10 real NYC trips for problems like this. Try a normal tip!" |
@@ -167,16 +171,22 @@ The state machine is in [DIAGRAMS §5](../DIAGRAMS.md#5-trace-checkpoint-stages-
 - **Consumer.** A background consumer of `trace.checkpoints` and `sim.clock`.
   - Group id `api-relay-<random>` with `auto.offset.reset=latest` and no commits: every api instance sees everything from "now".
   - It runs in a thread and hands messages to the asyncio loop.
+  - The thread never dies on an error: any exception is logged as `trace_relay_error` and the consumer is rebuilt after 2 s. A consumer error message (broker down) is logged at most once every 30 s. `/api/healthz` reports `trace_relay` and `kafka_out` (the producer's delivery thread) as alive or not.
 - **Ordering.** Checkpoints of one trace can arrive out of order on the topic. `stored` is produced by a second producer right after the INSERT, while the processor's other checkpoints are flushed at the Quix commit. The relay and UI therefore **order by `seq`**, never by arrival, and compute latency from `at`.
-- **History.** An in-memory dict `trace_id → [checkpoints]` with a TTL of `TRACE_HISTORY_TTL_S` and max 20 k traces (LRU).
-  - On WS connect, if the trace isn't in memory (for example after an api restart), load it from `SELECT … FROM taxi.trace_events WHERE trace_id = {id:UUID} ORDER BY seq, at`.
-  - Merge and dedup by `(stage)`.
-- **`WS /api/trace/{id}`.** On connect, send `{"type":"history","checkpoints":[…],"sim_ts":…}`. Then send `{"type":"checkpoint", …checkpoint}` for each new one. Close after 10 min, or 60 s after a terminal stage (`queryable` or `rejected`).
-- **`WS /api/trace/live`.** On connect, send a snapshot of the last 20 student traces. Then stream every checkpoint where `source = 'student'`, the replay-sampled ones (flagged `ambient: true`, so the wall always has some movement), and a `{"type":"clock", sim_ts}` every second.
-- **Queryable detector.** On each `stored` checkpoint, any source:
-  - Poll `SELECT count() FROM taxi.trips WHERE trace_id = {id:UUID}` as `agent_ro` every `TRACE_QUERYABLE_POLL_MS`, for up to 10 s.
-  - The first time it returns > 0, produce `queryable` with `visible_after_ms`. On timeout, log `queryable_timeout`.
-  - Limit to 20 concurrent polls. The bloom-filter index on `trace_id` keeps this cheap.
+- **History.** An in-memory dict `trace_id → {stage: checkpoint}` with a TTL of `TRACE_HISTORY_TTL_S` and max 20 k traces (LRU).
+  - `GET /api/trace/{id}` and every WS connect **always** merge memory with `SELECT … FROM taxi.trace_events WHERE trace_id = {id:UUID} ORDER BY seq, at`, not memory alone: after an api restart memory only has what arrived since, so the merge is what makes a reload or reconnect show full history.
+  - Merge and dedup by `stage` (the first copy of a stage wins): the api both publishes `submitted`/`ingested` straight to the hub and produces them to Kafka, which its own relay also consumes, so the same stage can otherwise arrive at a client twice.
+  - If the merged checkpoints include `stored` but no terminal stage (`queryable`/`rejected`) — the api restarted between `stored` and `queryable` — the queryable detector is re-armed for that trace, so the viewer still reaches the end instead of hanging.
+- **`WS /api/trace/{id}`.** On connect, send `{"type": "history", "checkpoints": [...], "sim_ts": "..."}`. Then send `{"type": "checkpoint", "trace_id": ..., "trip_id": ..., "source": ..., "stage": ..., "seq": ..., "service": ..., "at": ..., "detail": {...}}` for each new one. Close after 10 min, or 60 s after a terminal stage (`queryable` or `rejected`).
+  - **Catch-up.** If no new checkpoint arrives for 5 s and the trace isn't terminal, re-read the history and send every stage this client hasn't seen as a `checkpoint` frame: the relay may have missed some while it (re)joined. A newly found `stored` re-arms the queryable detector. Each refresh that finds nothing doubles the wait (up to 60 s), and the close deadlines above still apply.
+- **`WS /api/trace/live`.** On connect, send `{"type": "snapshot", "traces": [{"trace_id": ..., "checkpoints": [...]}, ...], "sim_ts": "..."}` for the last 20 student traces. Then stream:
+  - `{"type": "checkpoint", ...checkpoint, "ambient": true|false}` for every checkpoint (`ambient: true` when `source != "student"` — i.e. the replay-sampled ones — so the wall always has some movement even with no visitors);
+  - `{"type": "clock", "sim_ts": "..."}` once a second;
+  - `{"type": "stats", "rides_today": N, "rejected_today": N, "median_ms": {"ingested": N, "validated": N, ...}}` every 5 s. `rides_today`/`rejected_today` count `source = 'student'` checkpoints since wall-clock midnight; `median_ms` is the per-hop p50 over the last 15 wall minutes (any source), keyed by the arriving stage — `submitted` itself has no key, since it's the first hop with nothing before it to time from.
+- **Queryable detector.** On each `stored` checkpoint, any source, up to 20 pending traces at once (excess waits):
+  - Every `TRACE_QUERYABLE_POLL_MS`, one **batched** query for every pending trace: `SELECT DISTINCT trace_id FROM taxi.trips WHERE trace_id IN {ids:Array(UUID)}`, as `trace_ro` (ADR-019) — a burst of 50 rides costs a handful of queries per second, not one per ride.
+  - The first tick where a trace's id comes back, produce `queryable` with `visible_after_ms`. After 10 s per trace, give up and log `queryable_timeout`.
+  - Re-arms after an api restart (see History above): a trace stuck at `stored` with no terminal stage gets re-queued for polling as soon as its history is next read.
 
 ### Hand-off to the agent
 When `queryable` arrives, the viewer shows the button **"Where does my ride rank for tips today?"** It opens `/agent?trace_id=<id>&suggestion=ride_rank`. The api validates that the trace exists and injects the ride context (spec 06). For a cash ride, the expected answer explains that cash tips aren't recorded, which is another data-quality lesson.
@@ -184,7 +194,7 @@ When `queryable` arrives, the viewer shows the button **"Where does my ride rank
 ## Failure modes
 | Failure | Behaviour |
 |---|---|
-| Broker down | `503` "The pipeline is catching its breath, try again in a moment". No `submitted` is left dangling: if `trips.raw` fails, emit nothing further. The UI shows the error |
+| Broker down | `503` "The pipeline is catching its breath, try again in a moment". No `submitted` is left dangling: if `trips.raw` fails, emit nothing further. The UI shows the error. The producer gives up after 1 s (`message.timeout.ms`), well before the api's 2.5 s wait, so a 503 ride is not retried later. librdkafka's "possibly persisted" case means a ride that timed out locally may still land; the effect is a harmless extra student trip with no checkpoints |
 | Processor down | The trace stops at `ingested`, and the viewer shows "waiting for the stream processor…" with a spinner. It resumes automatically when the processor recovers (the offset is still there) |
 | api restarted mid-trace | The viewer reconnects (exponential backoff) and gets history from ClickHouse |
 | ClickHouse slow | `queryable` arrives late. The viewer shows the elapsed time. Nothing breaks |

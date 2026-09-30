@@ -24,10 +24,10 @@ All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form
 ```
 
 ## Config
-- `NEXT_PUBLIC_STAND_URL` (= `STAND_PUBLIC_URL`) for the QR codes.
+- `STAND_PUBLIC_URL` (server-only, **not** `NEXT_PUBLIC_STAND_URL`): read at request time by the `/qr` and `/trace/live` server components (both render `dynamic = "force-dynamic"` for exactly this reason), never baked into the image at build time.
 - `NEXT_PUBLIC_GRAFANA_PATH=/grafana/d/nyc-taxi-live?kiosk&refresh=5s`.
 - `STAND_WIFI_SSID` and `STAND_WIFI_PASSWORD` for the `/qr` Wi-Fi code (read on the server side only, in the `/qr` server component).
-- Dev only: `API_ORIGIN=http://localhost:8000`, used by Next `rewrites` for `/api/*`. WebSocket in dev connects directly to `ws://localhost:8000`. In the stand setup, Caddy serves everything from one origin.
+- Dev only: `API_ORIGIN=http://localhost:8000`, used by Next `rewrites` for `/api/*`. `NEXT_PUBLIC_API_WS_ORIGIN` (dev only) points the WebSocket client at `ws://localhost:8000` directly, since `EventSource`/`WebSocket` can't go through the Next rewrite the way `fetch` can. In the stand setup, Caddy serves everything from one origin and this is unset, so the client connects same-origin.
 
 ## Behaviour
 
@@ -76,7 +76,7 @@ All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form
 3. **Payment**: a Card/Cash toggle. Picking cash shows the info line "Cash tips aren't recorded in NYC taxi data".
 4. **Tip**: chips for $0, 15%, 20%, 25%, and Custom. Custom allows up to $999, and there's no warning about absurd values. The processor will reject them, and that's the lesson.
 5. **Passengers**: 1–6 stepper, default 1.
-6. **Book ride** (big button) posts, then navigates to `/trace/[id]`. The last `trace_id` is saved in `localStorage` (inside try/catch) so reopening shows "Continue watching your ride".
+6. **Book ride** (big button) posts, then navigates to `/trace/[id]`. While a % tip is chosen and the estimate hasn't arrived, the button says "Estimating…" and is disabled, so the tip is never silently sent as $0. If the estimate request fails, booking is allowed and the tip line shows the $0 that will be sent. The last `trace_id` is saved in `localStorage` (inside try/catch) so reopening shows "Continue watching your ride".
 
 There's no name field and no free text anywhere.
 
@@ -105,7 +105,8 @@ There's no name field and no free text anywhere.
 
 ### Tech choices
 - Next.js App Router, `output: "standalone"` (for the Docker image), TypeScript `strict`, pnpm, Tailwind.
-- Charts: Recharts. SQL highlighting: `prism-react-renderer` or `shiki` (pick the smaller one). Animation: `motion` (framer-motion). QR: `qrcode.react`.
+- Charts: Recharts. SQL highlighting: `prism-react-renderer` or `shiki` (pick the smaller one). QR: `qrcode.react`.
+- **Animation: plain CSS `@keyframes`, not `motion` (framer-motion).** The stage-card light-up and the travelling "packet" dot on `/ride` and `/trace/[id]` are the only animations in the app, and CSS keyframes do the job with zero extra JS — worth calling out since it's a deliberate change from the animation library named earlier in this spec's stack list, to keep those two pages inside the 150 kB first-load budget (spec 08 acceptance 4).
 - **SSE over POST:** `fetch` + a `ReadableStream` parser (about 40 lines, in `lib/sse.ts`), because `EventSource` can't POST. Unit-test the parser.
 - A typed API client in `lib/api.ts`. TypeScript types for checkpoints and trips are generated from `contracts/events/*.schema.json` with `json-schema-to-typescript` (`pnpm gen:types`).
 - Use the `setup-nextjs-project` skill to scaffold, the `frontend-design` skill for the visual pass, and the `dataviz` skill before building charts.

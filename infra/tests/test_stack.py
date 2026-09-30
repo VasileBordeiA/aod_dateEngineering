@@ -106,6 +106,26 @@ def test_agent_ro_can_read_whitelist(agent):
         agent.query(f"SELECT * FROM taxi.{t} LIMIT 1")
 
 
+@pytest.fixture(scope="module")
+def trace_ro():
+    return client("trace_ro", "CLICKHOUSE_TRACE_PASSWORD")
+
+
+def test_trace_ro_reads_the_agent_whitelist_with_parameters(trace_ro):
+    for t in ["trips", "trips_rejected", "agg_borough_minute", "zones", "sim_now", "trace_events"]:
+        trace_ro.query(f"SELECT * FROM taxi.{t} LIMIT 1")
+    r = trace_ro.query("SELECT count() FROM taxi.trips WHERE trace_id = {id:UUID}",
+                       parameters={"id": str(uuid.uuid4())})
+    assert r.result_rows == [(0,)]
+
+
+@pytest.mark.parametrize("sql", ["SELECT count() FROM taxi.agent_log", "SELECT count() FROM system.query_log",
+                                 "INSERT INTO taxi.trips (trip_id) VALUES ('x')"])
+def test_trace_ro_is_read_only_and_cannot_read_visitor_text(trace_ro, sql):
+    with pytest.raises(DatabaseError):
+        trace_ro.query(sql)
+
+
 def test_ingest_writer_can_insert_but_not_read(admin):
     ingest = client("ingest_writer", "CLICKHOUSE_INGEST_PASSWORD")
     ingest.insert("trips_rejected", [["stack-test", "replay", None, None, ["SCHEMA_INVALID"], "{}",

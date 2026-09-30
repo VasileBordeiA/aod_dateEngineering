@@ -3,23 +3,36 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from starlette.requests import HTTPConnection
 
 from agent.catalog import Catalog
 from agent.golden import load_golden, suggestions
 from agent.providers import ProviderPool, openai_client
 from agent.service import AgentService, AskRequest
-from api.config import Config
-from api.db import ClickHouseDb, Db, DbError, DbUnavailable
+from api.db import ClickHouseDb, ClickHouseTraceDb, Db, DbError, DbUnavailable
+from api.envconfig import Config
+from api.kafka import KafkaOut
+from api.ratelimit import TokenBucket
 from api.simclock import SimClockFollower
+from rides.checkpoints import TRACE_TOPIC
+from rides.history import TraceHistory
+from rides.hub import Hub
+from rides.queryable import QueryableDetector
+from rides.relay import TraceRelay
+from rides.service import RideRejected, RideRequest, RideService
+from rides.trace_service import TraceService, normalise_trace_id, serve
 
 
 class SimClockSource(Protocol):
@@ -34,6 +47,10 @@ class Deps:
     pool: Any = None  # agent.providers.ProviderPool (Task 5)
     agent: Any = None  # agent.service.AgentService (Task 7)
     golden: tuple[Any, ...] = ()  # agent.golden.GoldenQuestion (Task 3)
+    rides: Any = None  # rides.service.RideService (Task 3)
+    trace: Any = None  # rides.trace_service.TraceService
+    out: Any = None  # api.kafka.KafkaOut: /api/healthz reports whether its thread is alive (None: not reported)
+    relay: Any = None  # rides.relay.TraceRelay: likewise
 
 
 class OrderBody(BaseModel):
@@ -54,16 +71,77 @@ class AskBody(BaseModel):
         return v
 
 
+class RideBody(BaseModel):
+    pickup_location_id: int = Field(ge=1, le=263)
+    dropoff_location_id: int = Field(ge=1, le=263)
+    payment: Literal["card", "cash"]
+    tip_amount: float = Field(ge=0, le=999)  # absurd tips are allowed on purpose: the processor rejects them
+    passenger_count: int = Field(ge=1, le=6)
+
+    @field_validator("pickup_location_id", "dropoff_location_id", "passenger_count", mode="before")
+    @classmethod
+    def whole_number(cls, v: Any, info: ValidationInfo) -> Any:
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"{info.field_name} must be a whole number")
+        return v
+
+    @field_validator("tip_amount", mode="before")
+    @classmethod
+    def money(cls, v: Any) -> Any:
+        if isinstance(v, bool) or not isinstance(v, int | float):
+            raise ValueError("tip_amount must be a number")
+        try:
+            f = float(v)  # a JSON integer can be arbitrarily large: 10**400 doesn't fit a float
+        except OverflowError:
+            raise ValueError("tip_amount must be a number") from None
+        if not math.isfinite(f):
+            raise ValueError("tip_amount must be a number")
+        if abs(round(f, 2) - f) > 1e-9:
+            raise ValueError("tip_amount has at most 2 decimals")
+        return f
+
+
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
+READS_BUSY = "Too many requests, try again in a few seconds"
+WS_TRY_AGAIN_LATER = 1013
 
 
 def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
     app = FastAPI(title="NYC Taxi Live api", lifespan=lifespan, docs_url=None, redoc_url=None)
     zones_cache: list[dict[str, Any]] = []
+    # One per-IP bucket for the public trace reads (estimate, trace history, each WS connect): they share the
+    # trace_ro quota with the queryable poller, so one phone reloading in a loop can't starve it.
+    reads = TokenBucket(deps.cfg.trace_read_rate_limit_per_min)
+
+    def read_wait_s(conn: HTTPConnection) -> int | None:
+        """None if this read is allowed, else the seconds to wait. The IP is only the in-memory key, never logged."""
+        ok, retry = reads.allow(conn.client.host if conn.client else "unknown")
+        return None if ok else max(1, math.ceil(retry))
+
+    def limit_read(request: Request) -> None:
+        wait = read_wait_s(request)
+        if wait is not None:
+            raise RideRejected(429, READS_BUSY, wait)  # same body and Retry-After header as the ride limits
 
     @app.exception_handler(DbUnavailable)
     async def db_down(_: Request, __: DbUnavailable) -> JSONResponse:
         return JSONResponse({"detail": "The database is restarting, try again in a moment."}, status_code=503)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_body(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # A NaN/Infinity in the body reaches here as a raw non-finite float in `errors()[i]["input"]`, and the
+        # standard-library json encoder rejects it (allow_nan=False), so it must be sanitised before it is encoded.
+        sane = jsonable_encoder(exc.errors(), custom_encoder={float: lambda v: v if math.isfinite(v) else None})
+        return JSONResponse({"detail": sane}, status_code=422)
+
+    @app.exception_handler(RideRejected)
+    async def ride_rejected(_: Request, exc: RideRejected) -> JSONResponse:
+        body: dict[str, Any] = {"detail": exc.message}
+        headers: dict[str, str] = {}
+        if exc.retry_after_s is not None:
+            body["retry_after_s"] = exc.retry_after_s
+            headers["Retry-After"] = str(exc.retry_after_s)
+        return JSONResponse(body, status_code=exc.status, headers=headers)
 
     @app.get("/api/healthz")
     async def healthz() -> dict[str, Any]:
@@ -72,7 +150,12 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
             clickhouse = True
         except (DbError, DbUnavailable):
             clickhouse = False
-        return {"ok": True, "clickhouse": clickhouse, "sim_clock": deps.sim_clock.latest is not None}
+        body: dict[str, Any] = {"ok": True, "clickhouse": clickhouse, "sim_clock": deps.sim_clock.latest is not None}
+        if deps.out is not None:
+            body["kafka_out"] = bool(deps.out.alive)
+        if deps.relay is not None:
+            body["trace_relay"] = bool(deps.relay.alive)
+        return body
 
     @app.get("/api/zones")
     async def zones() -> list[dict[str, Any]]:
@@ -89,6 +172,53 @@ def create_app(deps: Deps, lifespan: Lifespan | None = None) -> FastAPI:
         if deps.sim_clock.latest is None:
             raise HTTPException(503, "The sim clock hasn't been received yet.")
         return deps.sim_clock.latest
+
+    @app.get("/api/rides/estimate")
+    async def ride_estimate(request: Request, pickup_location_id: int = Query(ge=1, le=263),
+                            dropoff_location_id: int = Query(ge=1, le=263)) -> dict[str, Any]:
+        limit_read(request)
+        est = await deps.rides.estimate(pickup_location_id, dropoff_location_id)
+        return {"trip_distance": est.trip_distance, "duration_min": est.duration_min,
+                "fare_amount": est.fare_amount, "method": est.method}
+
+    @app.post("/api/rides", status_code=201)
+    async def create_ride(body: RideBody, request: Request) -> dict[str, Any]:
+        # uvicorn --proxy-headers: the host comes from X-Forwarded-For. It's only a rate-limit key, never logged.
+        client_ip = request.client.host if request.client else "unknown"
+        req = RideRequest(body.pickup_location_id, body.dropoff_location_id, body.payment, round(body.tip_amount, 2),
+                          body.passenger_count)
+        result: dict[str, Any] = await deps.rides.create(req, client_ip)
+        return result
+
+    # /api/trace/live must be registered before /api/trace/{trace_id}, or "live" is parsed as an id
+    @app.websocket("/api/trace/live")
+    async def trace_live(ws: WebSocket) -> None:
+        await ws.accept()
+        if read_wait_s(ws) is not None:
+            await ws.close(code=WS_TRY_AGAIN_LATER)  # the web client reconnects with a back-off
+            return
+        await serve(ws, deps.trace.live(ws))
+
+    @app.websocket("/api/trace/{trace_id}")
+    async def trace_follow(ws: WebSocket, trace_id: str) -> None:
+        tid = normalise_trace_id(trace_id)
+        if tid is None:
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        if read_wait_s(ws) is not None:
+            await ws.close(code=WS_TRY_AGAIN_LATER)  # the web client reconnects with a back-off
+            return
+        await serve(ws, deps.trace.follow(ws, tid))
+
+    @app.get("/api/trace/{trace_id}")
+    async def trace_history(trace_id: str, request: Request) -> dict[str, Any]:
+        limit_read(request)
+        tid = normalise_trace_id(trace_id)
+        cps = await deps.trace.history(tid) if tid else []
+        if not cps:
+            raise HTTPException(404, "No such ride.")
+        return {"trace_id": tid, "checkpoints": cps}
 
     @app.get("/api/llm/status")
     async def llm_status() -> dict[str, Any]:
@@ -130,14 +260,39 @@ def app_from_env() -> FastAPI:
     db = ClickHouseDb(cfg)
     catalog = Catalog(db)
     agent = AgentService(cfg, db, pool, catalog, golden)
-    deps = Deps(cfg=cfg, db=db, sim_clock=follower, pool=pool, agent=agent, golden=tuple(golden))
+    out = KafkaOut(cfg.brokers)
+    trace_db = ClickHouseTraceDb(cfg)
+    hub = Hub(TraceHistory(cfg.trace_history_ttl_s))
+
+    def emit(cp: dict[str, Any]) -> None:
+        out.send_nowait(TRACE_TOPIC, cp["trace_id"], cp)  # → taxi.trace_events (Kafka engine) and back via the relay
+        hub.publish(cp)
+
+    detector = QueryableDetector(trace_db, emit, cfg.trace_queryable_poll_ms)
+    hub.on_stored = detector.on_stored
+    rides = RideService(cfg, trace_db, out, follower, publish=hub.publish)
+    trace = TraceService(hub, trace_db, follower)
+    relay = TraceRelay(cfg.brokers)
+    deps = Deps(cfg=cfg, db=db, sim_clock=follower, pool=pool, agent=agent, golden=tuple(golden),
+                rides=rides, trace=trace, out=out, relay=relay)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        loop = asyncio.get_running_loop()
+
+        def deliver(cp: dict[str, Any]) -> None:  # relay thread → event loop (the Hub is event-loop only)
+            loop.call_soon_threadsafe(hub.publish, cp)
+
         follower.start()
-        health = asyncio.create_task(pool.health_loop(cfg.llm_health_interval_s))
+        out.start()
+        relay.start(deliver)
+        tasks = [asyncio.create_task(pool.health_loop(cfg.llm_health_interval_s)),
+                 asyncio.create_task(detector.run()), asyncio.create_task(rides.warm_up())]
         yield
-        health.cancel()
+        for t in tasks:
+            t.cancel()
+        relay.stop()
+        out.stop()
         follower.stop()
 
     return create_app(deps, lifespan)

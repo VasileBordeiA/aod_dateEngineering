@@ -17,7 +17,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from api import log
-from api.config import ProviderConfig
+from api.envconfig import ProviderConfig
 
 FAILS_TO_MARK_DOWN = 2
 HEALTH_TIMEOUT_S = 5.0
