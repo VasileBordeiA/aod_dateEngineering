@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 
 from agent.golden import load_golden
 from agent.providers import ProviderPool
-from api.config import ProviderConfig
 from api.db import DbUnavailable, Result
+from api.envconfig import ProviderConfig
 from api.main import Deps, create_app
 
 

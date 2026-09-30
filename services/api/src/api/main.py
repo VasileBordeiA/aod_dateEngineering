@@ -17,8 +17,8 @@ from agent.catalog import Catalog
 from agent.golden import load_golden, suggestions
 from agent.providers import ProviderPool, openai_client
 from agent.service import AgentService, AskRequest
-from api.config import Config
 from api.db import ClickHouseDb, Db, DbError, DbUnavailable
+from api.envconfig import Config
 from api.simclock import SimClockFollower
 
 

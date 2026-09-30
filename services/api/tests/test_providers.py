@@ -2,7 +2,7 @@ import pytest
 from fake_llm import FakeLLM
 
 from agent.providers import ProviderPool
-from api.config import ProviderConfig
+from api.envconfig import ProviderConfig
 
 LOCAL = ProviderConfig("local", "http://fake-local/v1", "ollama", "qwen")
 INTERNAL = ProviderConfig("internal", "http://fake-gw/v1", "k", "gpt")

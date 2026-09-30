@@ -43,6 +43,12 @@ class Config:
     max_queue: int
     admin_token: str
     golden_path: Path
+    trace_user: str
+    trace_password: str
+    rides_rate_limit_per_min: int
+    rides_global_per_min: int
+    trace_history_ttl_s: float
+    trace_queryable_poll_ms: int
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Config:
@@ -87,4 +93,10 @@ class Config:
             max_queue=int(get("AGENT_MAX_QUEUE", "6")),
             admin_token=get("ADMIN_TOKEN"),
             golden_path=Path(get("AGENT_GOLDEN_PATH", "/app/evals/agent_golden_questions.yaml")),
+            trace_user=get("CLICKHOUSE_TRACE_USER", "trace_ro"),
+            trace_password=get("CLICKHOUSE_TRACE_PASSWORD"),
+            rides_rate_limit_per_min=int(get("RIDES_RATE_LIMIT_PER_MIN", "3")),
+            rides_global_per_min=int(get("RIDES_GLOBAL_PER_MIN", "30")),
+            trace_history_ttl_s=float(get("TRACE_HISTORY_TTL_S", "3600")),
+            trace_queryable_poll_ms=int(get("TRACE_QUERYABLE_POLL_MS", "250")),
         )

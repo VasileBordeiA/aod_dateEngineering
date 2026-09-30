@@ -4,15 +4,16 @@ from typing import Any
 
 import pytest
 
-from api.config import Config
 from api.db import Result
+from api.envconfig import Config
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "contracts"))
 GOLDEN = REPO / "evals" / "agent_golden_questions.yaml"
 
 BASE_ENV = {
-    "CLICKHOUSE_AGENT_PASSWORD": "a", "CLICKHOUSE_INGEST_PASSWORD": "i", "ADMIN_TOKEN": "t0ken",
+    "CLICKHOUSE_AGENT_PASSWORD": "a", "CLICKHOUSE_INGEST_PASSWORD": "i", "CLICKHOUSE_TRACE_PASSWORD": "t",
+    "ADMIN_TOKEN": "t0ken",
     "LLM_LOCAL_BASE_URL": "http://fake-local/v1", "LLM_LOCAL_API_KEY": "ollama", "LLM_LOCAL_MODEL": "fake-local",
     "LLM_INTERNAL_BASE_URL": "", "AGENT_GOLDEN_PATH": str(GOLDEN),
 }
@@ -42,6 +43,24 @@ class FakeDb:
 
     async def insert_agent_log(self, row: dict[str, Any]) -> None:
         self.logged.append(row)
+
+
+class FakeTraceDb:
+    """query() answers by the first `results` key that is a substring of the SQL; records (sql, params)."""
+
+    def __init__(self, results: dict[str, Result] | None = None) -> None:
+        self.results = results or {}
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.fail: Exception | None = None
+
+    async def query(self, sql: str, params: dict[str, Any]) -> Result:
+        self.calls.append((sql, params))
+        if self.fail is not None:
+            raise self.fail
+        for needle, result in self.results.items():
+            if needle in sql:
+                return result
+        return Result(columns=[], rows=[], elapsed_ms=1)  # "nothing found", like an empty table
 
 
 @pytest.fixture

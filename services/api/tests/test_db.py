@@ -2,13 +2,14 @@ import json
 import math
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 from conftest import make_config
 
-from api.db import ClickHouseDb, DbError, DbUnavailable, Result, clickhouse_message, jsonable
+from api.db import ClickHouseDb, ClickHouseTraceDb, DbError, DbUnavailable, Result, clickhouse_message, jsonable
 
 
 def test_jsonable_scalars_and_nan():
@@ -43,8 +44,17 @@ class _Boom:
     def __init__(self, exc: Exception) -> None:
         self.exc = exc
 
-    def query(self, sql: str) -> None:
+    def query(self, sql: str, parameters: object = None) -> None:
         raise self.exc
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    def query(self, sql: str, parameters: object = None) -> SimpleNamespace:
+        self.calls.append((sql, parameters))
+        return SimpleNamespace(column_names=("n",), column_types=(SimpleNamespace(name="UInt64"),), result_rows=[(2,)])
 
 
 @pytest.mark.anyio
@@ -69,3 +79,22 @@ async def test_insert_agent_log_never_raises():
     db = ClickHouseDb(make_config())
     db._ingest = _Boom(OperationalError("down"))
     await db.insert_agent_log({"question": "x"})  # logged, not raised
+
+
+@pytest.mark.anyio
+async def test_trace_db_sends_server_side_parameters():
+    db = ClickHouseTraceDb(make_config())
+    db._client = _Recorder()
+    r = await db.query("SELECT count() AS n FROM taxi.trips WHERE trace_id = {id:UUID}", {"id": "00000000-0000-0000-0000-000000000001"})
+    assert r.rows == [[2]] and r.names == ["n"]
+    assert db._client.calls == [("SELECT count() AS n FROM taxi.trips WHERE trace_id = {id:UUID}",
+                                 {"id": "00000000-0000-0000-0000-000000000001"})]
+
+
+@pytest.mark.anyio
+async def test_trace_db_operational_error_resets_client():
+    db = ClickHouseTraceDb(make_config())
+    db._client = _Boom(OperationalError("down"))
+    with pytest.raises(DbUnavailable):
+        await db.query("SELECT 1", {})
+    assert db._client is None

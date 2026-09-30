@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from confluent_kafka import OFFSET_END, Consumer, KafkaException, TopicPartition
@@ -15,8 +17,9 @@ TOPIC = "sim.clock"
 
 
 class SimClockFollower:
-    def __init__(self, brokers: str) -> None:
+    def __init__(self, brokers: str, now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
         self._brokers = brokers
+        self._now = now
         self.latest: dict[str, Any] | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -28,6 +31,19 @@ class SimClockFollower:
             return
         if isinstance(msg, dict) and "sim_ts" in msg:
             self.latest = msg
+
+    def fresh_sim_ts(self, max_age_s: float = 10.0) -> str | None:
+        """sim_ts of the latest heartbeat if its wall `at` is at most max_age_s old (spec 07 §Ride creation step 2)."""
+        msg = self.latest
+        if msg is None:
+            return None
+        try:
+            at = datetime.strptime(str(msg["at"]), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
+        except (KeyError, ValueError):
+            return None
+        if (self._now() - at).total_seconds() > max_age_s:
+            return None
+        return str(msg["sim_ts"])
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="sim-clock", daemon=True)

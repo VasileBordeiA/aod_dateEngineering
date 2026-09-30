@@ -49,6 +49,16 @@
                 <execution_time>300</execution_time>
             </interval>
         </grafana>
+        <trace>
+            <interval>
+                <duration>60</duration>
+                <queries>1200</queries>
+                <errors>600</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>120</execution_time>
+            </interval>
+        </trace>
     </quotas>
     <users>
         <!-- Ports are published on 127.0.0.1 only, so ::/0 means "the Compose network + this laptop". -->
@@ -78,6 +88,23 @@
                 <query>GRANT SELECT ON taxi.trace_events</query>
             </grants>
         </agent_ro>
+        <!-- The api's own fixed, parameterised reads: ride estimates, the queryable poller, trace history, wall stats.
+             Same profile and grants as agent_ro (so "visible to trace_ro" = "visible to the agent"), but its own
+             quota: polling must never use up the agent's 120 queries/min (ADR-019). -->
+        <trace_ro>
+            <password from_env="CLICKHOUSE_TRACE_PASSWORD"/>
+            <profile>agent</profile>
+            <quota>trace</quota>
+            <networks><ip>::/0</ip></networks>
+            <grants>
+                <query>GRANT SELECT ON taxi.trips</query>
+                <query>GRANT SELECT ON taxi.trips_rejected</query>
+                <query>GRANT SELECT ON taxi.agg_borough_minute</query>
+                <query>GRANT SELECT ON taxi.zones</query>
+                <query>GRANT SELECT ON taxi.sim_now</query>
+                <query>GRANT SELECT ON taxi.trace_events</query>
+            </grants>
+        </trace_ro>
         <grafana_ro>
             <password from_env="CLICKHOUSE_GRAFANA_PASSWORD"/>
             <profile>grafana</profile>
