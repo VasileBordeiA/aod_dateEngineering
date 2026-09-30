@@ -20,12 +20,12 @@ docs/                  plan, architecture, decisions, runbook, demo script, spec
 services/replayer/     Python: Parquet → trips.raw at N× speed, sim.clock, control API
 services/processor/    Python/Quix Streams: validate, enrich, window, ClickHouse sink
 services/api/          Python/FastAPI: agent (SSE), rides, trace relay (WS), zones
-web/                   Next.js + TypeScript: /agent /ride /trace/[id] /trace/live /architecture /qr
+web/                   Next.js + TypeScript: /agent /ride /trace/[id] /trace/live /qr
 infra/clickhouse/      DDL (init/*.sql), users.d/*.xml, zone loader
 infra/grafana/         provisioning/ datasources + dashboards JSON
 infra/caddy/           Caddyfile (single entry point on :80)
 infra/redpanda/        topic bootstrap script
-scripts/               data prep, preflight, soak, burst test
+scripts/               data prep, eval, burst test
 data/                  git-ignored: raw downloads, prepared parquet, zones.csv, state/
 ```
 Nothing outside `docs/`, `contracts/` and `evals/` exists yet. Build it by following the specs, in the milestone order in the plan.
@@ -36,10 +36,8 @@ Nothing outside `docs/`, `contracts/` and `evals/` exists yet. Build it by follo
 | `make data` | Download TLC month + zone files, prepare sorted replay parquet + `zones.csv` (spec 01) |
 | `make up` / `make down` | Start or stop the Compose stack (Ollama runs natively, not in Compose) |
 | `make backfill UNTIL=2025-10-14T07:00:00` | Replay at max speed through the real pipeline up to UNTIL |
-| `make preflight` | Stand-readiness checks (see RUNBOOK). Must be green before opening. |
 | `make test` | Unit + integration tests (Python: pytest, web: vitest + Playwright) |
 | `make eval [MODEL=…]` | Run `evals/agent_golden_questions.yaml` against the configured LLM |
-| `make soak HOURS=10` | Long run with synthetic visitors |
 | `make pause` / `make resume` / `make speed S=120` | Replayer control |
 | `make logs S=processor` | Tail one service |
 | `make status` | Containers, memory, processor lag, freshness, LLM status |

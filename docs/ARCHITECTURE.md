@@ -51,7 +51,7 @@ flowchart TB
 | Dashboard | Grafana + ClickHouse datasource | Live city view (public) and stand-health view (separate operator-only Grafana) | [05](specs/05-grafana-dashboards.md) |
 | AI agent | FastAPI + openai SDK → Ollama / internal gateway | Text-to-SQL with tools, guardrails, SSE | [06](specs/06-ai-data-agent.md) |
 | Trace your ride | FastAPI (rides + WS relay) + processor checkpoints | Student ride creation and live stage tracking | [07](specs/07-trace-your-ride.md) |
-| Web UI | Next.js + TypeScript | /agent, /ride, /trace, /architecture, /qr | [08](specs/08-web-frontend.md) |
+| Web UI | Next.js + TypeScript | /agent, /ride, /trace, /qr | [08](specs/08-web-frontend.md) |
 | Edge & infra | Caddy, Docker Compose, travel router | Single entry point, networking, resources | [09](specs/09-infrastructure-and-networking.md) |
 
 ## 3. Data flow

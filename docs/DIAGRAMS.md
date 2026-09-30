@@ -366,7 +366,7 @@ The health check is a background task that calls `GET {base_url}/models` every 1
 
 ```mermaid
 flowchart LR
-    arrive([Student arrives]) --> pitch["30 s pitch<br/>architecture poster + /architecture"]
+    arrive([Student arrives]) --> pitch["30 s pitch<br/>architecture poster"]
     pitch --> dash["Point at live dashboard<br/>'this is NYC, right now, at 60×'"]
     dash --> ask{"Wants to try?"}
     ask -- yes --> agent["Ask the agent<br/>(suggested button or own question)"]
@@ -408,9 +408,6 @@ gantt
     section M4 Trace your ride
     Rides API + checkpoints + WS relay         :b3, 2026-10-09, 2d
     /ride, /trace/[id], /trace/live            :c3, 2026-10-09, 3d
-    section M5 Hardening
-    Soak test 10 h + chaos drills              :h1, 2026-10-13, 2d
-    Runbook, rehearsal, QR + posters           :h2, 2026-10-14, 2d
     Event day                                  :milestone, ev, 2026-10-16, 0d
 ```
 

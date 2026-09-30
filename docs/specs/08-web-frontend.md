@@ -1,7 +1,7 @@
 # Spec 08: Web frontend (Next.js + TypeScript)
 
 ## Purpose
-All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form, the trace viewers, the clickable architecture, and the QR display. The UI must be **legible from a distance, instant, and honest**: it shows the SQL, the stages, and the rejections.
+All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form, the trace viewers, and the QR display. The UI must be **legible from a distance, instant, and honest**: it shows the SQL, the stages, and the rejections.
 
 ## Responsibilities
 - Pages and components listed below, a typed API client (SSE + WebSocket), and the fixed visual language.
@@ -14,14 +14,7 @@ All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form
 | `GET /api/zones`, `GET /api/rides/estimate`, `POST /api/rides` | `/ride` | 07 |
 | `WS /api/trace/{id}` | `/trace/[id]` | 07 |
 | `WS /api/trace/live` | `/trace/live` | 07 |
-| `GET /api/stats` | `/architecture`, `/agent` header | this spec (below), implemented in api |
 | `GET /api/sim/clock` | header sim clock on every page | 07 |
-
-`GET /api/stats` is computed by the api from ClickHouse and cached for 2 s:
-```json
-{ "sim_ts": "2025-10-09T17:42:00", "trips_per_s": 96.4, "rejected_per_s": 3.1, "total_trips": 1834221,
-  "freshness_ms": 820, "student_rides_today": 57, "agent_questions_today": 212 }
-```
 
 ## Config
 - `STAND_PUBLIC_URL` (server-only, **not** `NEXT_PUBLIC_STAND_URL`): read at request time by the `/qr` and `/trace/live` server components (both render `dynamic = "force-dynamic"` for exactly this reason), never baked into the image at build time.
@@ -39,7 +32,6 @@ All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form
 | `/ride` | **phone** (from the QR code) | The booking form. See below |
 | `/trace/[id]` | phone | The student's ride moving through the stages |
 | `/trace/live` | tablet or second screen | The wall of recent student rides crossing the pipeline |
-| `/architecture` | stand laptop | Clickable diagram with live counters |
 | `/qr` | tablet | Two large QR codes: "1. Join Wi-Fi" (`WIFI:T:WPA;S:…;P:…;;`) and "2. Open `<stand>/ride`" |
 
 ### `/agent` layout (kiosk)
@@ -94,14 +86,6 @@ There's no name field and no free text anywhere.
 - Each student ride is a labelled dot (the first 4 characters of its trace_id plus the pickup borough) that jumps box to box as its checkpoints arrive. It fades out 20 s after its terminal stage.
 - Ambient replay-sampled dots are small and translucent, so the wall is never empty.
 - Side column: rides today, rejected today, median latency per hop, and a QR code for `/ride`.
-
-### `/architecture`
-- An SVG replica of the architecture image (see [DIAGRAMS §1](../DIAGRAMS.md#1-system-architecture)). Each box is clickable, and a side drawer opens with:
-  - what it does (2 sentences),
-  - which tech it uses and why (1 sentence),
-  - a live number from `/api/stats` (for example, Redpanda shows "96 trips/s entering"),
-  - a link to go deeper: Redpanda Console (laptop only), the Grafana panel, or `/trace/live`.
-- The drawer copy comes from [DEMO_SCRIPT](../DEMO_SCRIPT.md) §Talking points, so the two stay in sync.
 
 ### Tech choices
 - Next.js App Router, `output: "standalone"` (for the Docker image), TypeScript `strict`, pnpm, Tailwind.

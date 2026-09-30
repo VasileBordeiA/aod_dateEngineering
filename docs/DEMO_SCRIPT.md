@@ -4,7 +4,7 @@
 
 ---
 
-## The 30-second pitch (point at the poster / `/architecture`)
+## The 30-second pitch (point at the poster)
 > "Everything on these screens is **live**. We're replaying real New York taxi trips from October 2025, sixty times faster. Every second, about a hundred trips come in.
 >
 > They flow into **Redpanda**, which is like a conveyor belt for events. A **stream processor** cleans them. It throws out the broken ones: negative fares, trips of zero miles. It adds the neighbourhood names and counts everything minute by minute. The results land in **ClickHouse**, a database built for fast analytics.
@@ -22,7 +22,6 @@
 6. **(2:45) Close.** "Now ask the AI where your tip ranks today." Hand out the careers flyer.
 
 ## Talking points per component
-These texts are also the drawer copy on `/architecture` (spec 08). Keep them in sync.
 
 **Dataset replayer**
 - It replays **historical** data as if it were live, which is a common trick for testing pipelines.

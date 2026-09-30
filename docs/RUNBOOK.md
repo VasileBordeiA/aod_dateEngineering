@@ -17,7 +17,7 @@ Everything the operator types is a `make` target. **Don't improvise commands at 
   - the architecture poster (DIAGRAMS §1),
   - "How it works in 4 steps",
   - the QR card: ① join Wi-Fi `NYC-Taxi-Live`, ② open `http://192.168.8.10/ride`.
-- [ ] 10-hour soak passed on **the event laptop** (spec 10). Report committed.
+- [ ] Manual long run: a few hours at 60× with `make status` and Stand Health checks (memory flat, freshness < 5 s, parts < 300) on **the event laptop**.
 - [ ] Fallback video recorded (3 min: dashboard → agent question → ride trace).
 - [ ] **Real-IP check**, so rate limiting protects the laptop rather than one phone's neighbours (see the procedure in §3 step 5 below). Do this once now, away from the venue, so there's time to fix `.env` if Docker Desktop is hiding phones' real IPs.
 
@@ -30,7 +30,7 @@ make ollama-model BASE=qwen2.5-coder:14b   # creates taxi-qwen2.5-coder-14b (num
 make data                            # no-op if already prepared
 make up
 make backfill UNTIL=2025-10-14T07:00:00   # ~7 sim days of history (measured M1: 2 sim days = 283k rows in 23 s incl. processor drain → expect ~1.5 min)
-make preflight                       # must be all green
+# run the "Before opening" checklist below by hand — must be all ✅
 make eval ONLY=suggested             # 5/5
 make down                            # volumes keep everything
 ```
@@ -57,8 +57,8 @@ make down                            # volumes keep everything
    ```bash
    ollama serve        # if not running as a service (see spec 09 for env vars)
    make up             # also starts caffeinate
-   make preflight
    ```
+   Then run the "Before opening" checklist below by hand — must be all ✅.
 4. Open the kiosk windows:
    ```bash
    make kiosk          # Chrome kiosk: /agent on laptop, /grafana/d/nyc-taxi-live?kiosk on external screen
@@ -70,19 +70,19 @@ make down                            # volumes keep everything
    2. Right away, book one from phone B. It must succeed.
    3. If phone B is also refused, Docker Desktop is hiding the phones' real IPs (they all share one address behind NAT). Set `RIDES_RATE_LIMIT_PER_MIN=1000`, `AGENT_RATE_LIMIT_PER_MIN=1000` and `TRACE_READ_RATE_LIMIT_PER_MIN=10000` in `.env` and run `make up`. These are far above the global caps on purpose: every phone now shares one address, so a per-IP limit would throttle the whole room at once, and only the global caps (30 rides/min, the agent's concurrency and queue, the ClickHouse quotas) should apply. Record which case happened, in the packing/setup notes for the day.
 
-### What `make preflight` checks (all must be ✅)
+### Before opening (check by hand, all must be ✅)
 | Check | Pass condition |
 |---|---|
-| Containers | every service `healthy`, 0 restarts |
+| Containers | `make status` shows every service `healthy`, 0 restarts |
 | Disk | ≥ 20 GB free |
-| Topics | 6 topics exist. Processor lag < 1 000 |
-| Sim clock | two reads 3 s apart: Δsim ≈ 3 × REPLAY_SPEED (±20%). Not paused |
-| Freshness | `now64() − max(stored_at)` < 3 s |
+| Topics | `docker compose exec redpanda rpk topic list` shows 6 topics. `make status` shows processor lag < 1 000 |
+| Sim clock | two reads of `curl http://127.0.0.1:8000/api/sim/clock` 3 s apart: Δsim ≈ 3 × REPLAY_SPEED (±20%). Not paused |
+| Freshness | Stand Health shows `now64() − max(stored_at)` < 3 s |
 | ClickHouse | `taxi.zones` = 265 rows. `agent_ro` cannot INSERT (negative test) |
-| LLM | `/api/llm/status` shows an active provider healthy. `ollama ps` shows the model loaded |
-| Agent | the 5 suggested questions pass their eval checks |
-| Ride E2E | `POST /api/rides` reaches `queryable` in < 5 s |
-| Edge | `http://$STAND_PUBLIC_URL/`, `/agent`, `/ride`, `/grafana/api/health` all 200 via the LAN IP |
+| LLM | `curl http://127.0.0.1:8000/api/llm/status` shows an active provider healthy. `curl localhost:11434/v1/models` succeeds and `ollama ps` shows the model loaded |
+| Agent | the 5 suggested questions each answer (step 6 above) |
+| Ride E2E | the phone test (step 5): `POST /api/rides` reaches `queryable` in < 5 s |
+| Edge | `curl http://127.0.0.1:8000/api/healthz`, and `http://$STAND_PUBLIC_URL/`, `/agent`, `/ride`, `/grafana/api/health` all 200 via the LAN IP |
 | Kiosk safety | `caffeinate` running. Do Not Disturb on (manual reminder) |
 
 ## 4. During the day
@@ -120,14 +120,3 @@ make status > exports/status-<date>.txt
 make down            # stops caffeinate too
 ```
 - Note: what broke, which questions students asked most, and how many rides and questions there were. Put it in `docs/event-retro-<date>.md`.
-
-## 7. Chaos drill results (fill in during M5)
-| Drill | Date run | Real recovery time | Notes |
-|---|---|---|---|
-| Processor crash | | | |
-| ClickHouse outage 60 s | | | |
-| Broker restart | | | |
-| No internet | | | |
-| Ollama dies | | | |
-| API restart mid-trace | | | |
-| Laptop lid / sleep | | | |

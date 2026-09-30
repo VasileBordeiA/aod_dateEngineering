@@ -110,7 +110,7 @@ erDiagram
 ### Server settings (`config.d/stand.xml`)
 - `<timezone>UTC</timezone>`. **Required** by the sim-time model (ARCHITECTURE §4).
 - `<max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>`, with the container `mem_limit: 4g`.
-- The `default` user may connect from localhost only. Log level is `warning`. Enable `query_log` (the soak test uses it).
+- The `default` user may connect from localhost only. Log level is `warning`. Enable `query_log` (Stand Health's slow-query panel uses it).
 
 ### DDL
 
@@ -413,7 +413,7 @@ The init scripts only run on an empty data volume. `make migrate` re-applies all
 ## Failure modes
 | Failure | Behaviour |
 |---|---|
-| Too many parts | Prevented by 1 s batches. Monitored via `system.parts` in the soak test (alert if active parts per partition > 300) |
+| Too many parts | Prevented by 1 s batches. Monitored via `system.parts` on Stand Health (alert if active parts per partition > 300) |
 | Duplicates after a replay or processor restart | ReplacingMergeTree collapses them on merge. The error in `count()` is negligible. Use `FINAL` only in tests |
 | Kafka engine consumer stuck | The `trace_events` table stops growing, but the live trace viewer is unaffected (the api relay reads the topic directly). Fix: `DETACH`/`ATTACH TABLE taxi.trace_events_queue` |
 | Agent query too heavy | Killed at 5 s (`TIMEOUT_EXCEEDED`), and the agent gets the error and can repair the query |

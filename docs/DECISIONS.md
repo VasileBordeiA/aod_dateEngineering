@@ -280,3 +280,14 @@ no other run reached 100% on the 5 suggested questions.
 **Consequences.**
 - Tools and agents can read and edit it like any other module.
 - The import path is `api.envconfig`; nothing else in the module changed.
+
+## ADR-021: M5 (soak, chaos drills, preflight, /architecture) dropped; pre-event testing is manual
+**Status:** accepted · 2026-09-30
+
+**Context:** The user decided on 2026-09-30, after M4, to test the stand by hand rather than build out M5.
+
+**Decision:** Remove M5 and the features only it would have built: the soak script, the chaos-drill procedure, `make preflight`, and the `/architecture` page (with `GET /api/stats`, which only served it and the never-built `/agent` header). The RUNBOOK keeps a manual pre-event and morning checklist in their place.
+
+**Consequences:**
+- There's no automated long-run evidence, so the risks R4 (ClickHouse parts/memory growth) and R9 (replayer loop boundary) are now covered only by a manual long run, watched with `make status` and Stand Health.
+- ADR-018's "watch in the soak" item now means "watch in the manual long run".

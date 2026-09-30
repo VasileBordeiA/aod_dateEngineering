@@ -180,7 +180,7 @@ Grafana's own logs go to stdout. Stand Health *is* the observability for everyth
 3. With the replayer running at 60×, panels 1–5 visibly change on every 5 s refresh.
 4. Every panel query runs in < 500 ms on a backfilled dataset of ≥ 7 sim days (check via `system.query_log`).
 5. Anonymous users can view but cannot edit. The public Grafana has neither Stand Health nor the `clickhouse-ops` datasource, and `grafana-ops` answers 401 without a login.
-6. The kiosk URL works through Caddy at `/grafana/…` and inside an iframe on `/architecture`.
+6. The kiosk URL works through Caddy at `/grafana/…`.
 
 ## Out of scope
 Grafana alerting to external channels, Prometheus metrics, and per-visitor dashboards.

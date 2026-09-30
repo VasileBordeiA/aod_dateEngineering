@@ -21,9 +21,9 @@ brew install ollama && ollama pull qwen2.5-coder:14b && ollama serve   # native,
 make data                       # download + prepare one month of TLC data
 make up                         # start the stack
 make backfill UNTIL=2025-10-14T07:00:00   # optional: pre-load history
-make preflight                  # everything green? open the stand
+make status  # everything green? open the stand (RUNBOOK §3 checklist)
 ```
-The stand entry point is `http://<laptop-ip>/`. Key pages are `/agent`, `/ride`, `/trace/live`, `/grafana`, and `/architecture`.
+The stand entry point is `http://<laptop-ip>/`. Key pages are `/agent`, `/ride`, `/trace/live`, and `/grafana`.
 
 ## Documentation
 | Doc | Purpose |
@@ -33,7 +33,7 @@ The stand entry point is `http://<laptop-ip>/`. Key pages are `/agent`, `/ride`,
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, sim-time model, ports, budget |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture decision records |
 | [docs/DIAGRAMS.md](docs/DIAGRAMS.md) | All diagrams (Mermaid) |
-| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Operating the stand: setup, preflight, recovery |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Operating the stand: setup, checklists, recovery |
 | [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | What to say at the stand |
 | [docs/specs/](docs/specs/) | One spec per component (01–10) |
 | [contracts/events/](contracts/events/) | JSON Schemas for every stream message |

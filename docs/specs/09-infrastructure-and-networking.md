@@ -126,7 +126,7 @@ Live mode continues from the saved state (spec 01).
 - Run `OLLAMA_HOST=127.0.0.1:11434 OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=16384 ollama serve` as a launchd service or in a dedicated terminal.
   - If the pinned Ollama version doesn't support `OLLAMA_CONTEXT_LENGTH`, use the Modelfile route in spec 06.
 - Containers reach it at `host.docker.internal:11434`. Ollama binds to loopback only; Docker Desktop's host-gateway reaches loopback on macOS. **Verify this at M0.** If it can't, bind to `0.0.0.0` and rely on the macOS firewall.
-- `make preflight` checks both that `curl localhost:11434/v1/models` succeeds and that the model is loaded.
+- Before opening, check by hand that `curl localhost:11434/v1/models` succeeds and that the model is loaded (`ollama ps`).
 
 ### Stand network
 - **Router:** a small travel router (for example a GL.iNet class device).
@@ -157,7 +157,7 @@ Live mode continues from the saved state (spec 01).
 | Laptop sleeps | Prevented by caffeinate. If it happens anyway, the replayer re-anchors (spec 01) |
 | Router dies | Phone hotspot fallback (RUNBOOK) |
 | Docker Desktop hangs | RUNBOOK: quit Docker, `make up`. The volumes persist, so there's no data loss |
-| Disk fills | ~5 GB is needed in total. Preflight checks for ≥ 20 GB free |
+| Disk fills | ~5 GB is needed in total. Check for ≥ 20 GB free before the event |
 
 ## Observability
 - `make status` prints `docker compose ps`, memory per container (`docker stats --no-stream`), processor lag (`rpk group describe`), freshness, and the LLM status.
@@ -169,7 +169,7 @@ Live mode continues from the saved state (spec 01).
 3. From a phone on the stand router, `/ride`, `/trace/…`, `/agent`, and `/grafana/…` all load. `:8123`, `:9092`, and `:8080` are **not** reachable from the phone.
 4. SSE through Caddy: the first agent event arrives in < 500 ms with no batching. WebSocket trace works through Caddy.
 5. With the router's uplink unplugged, the full demo works with the local model.
-6. `docker stats` over the soak shows no container exceeding 90% of its memory limit.
+6. `docker stats` over a multi-hour run shows no container exceeding 90% of its memory limit.
 
 ## Out of scope
 TLS on the stand LAN (HTTP is fine for a closed network with no credentials), Kubernetes, and remote hosting.
