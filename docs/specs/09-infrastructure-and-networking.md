@@ -135,7 +135,7 @@ Live mode continues from the saved state (spec 01).
 
 ### Stand network
 - **Router:** a small travel router (for example a GL.iNet class device).
-  - SSID `NYC-Taxi-Live`, WPA2, with a simple password printed on the poster and on `/qr`.
+  - SSID `NYC-Taxi-Live`, WPA2, with a simple password printed on the poster (`/qr` shows only the ride code, ADR-025).
   - DHCP reservation for the laptop's MAC → **192.168.8.10**, which is `STAND_PUBLIC_URL`.
   - Plug the laptop in **by Ethernet** (USB-C adapter) for stability.
 - **Uplink** (optional, only needed for the internal AI gateway): the router's repeater mode to venue Wi-Fi, *or* USB tethering from a phone. The demo works with no uplink.

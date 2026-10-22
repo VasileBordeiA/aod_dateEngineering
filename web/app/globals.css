@@ -43,6 +43,10 @@ body {
 
 /* Phone pages (/ride, /trace/[id]) wrap their content in .phone: 16 px base instead of the kiosk's 20 px (spec 08). */
 html:has(.phone) { font-size: 16px; }
+/* /agent is the kiosk from lg (64rem) up, and a phone page below it (ADR-025). */
+@media (width < 64rem) {
+  html:has(.agent) { font-size: 16px; }
+}
 
 /* The packet dot travelling to the next stage card, and the "waiting for…" spinner. */
 @keyframes packet {

@@ -9,11 +9,11 @@ export function ResultTable({ rows, unit, valueColumns }: { rows: RowsData; unit
   return (
     <div className="flex max-h-[20rem] min-w-0 flex-col self-start rounded-xl border border-line bg-panel">
       <div className="min-h-0 overflow-auto">
-        <table className="w-full text-left text-base">
+        <table className="w-full text-left text-sm lg:text-base">
           <thead className="sticky top-0 bg-panel text-muted">
             <tr>
               {rows.columns.map((c, j) => (
-                <th key={c.name} scope="col" className={`px-3 py-2 font-medium whitespace-nowrap ${numeric[j] ? "text-right" : ""}`}>{c.name}</th>
+                <th key={c.name} scope="col" className={`px-2.5 py-2 font-medium whitespace-nowrap lg:px-3 ${numeric[j] ? "text-right" : ""}`}>{c.name}</th>
               ))}
             </tr>
           </thead>
@@ -26,7 +26,7 @@ export function ResultTable({ rows, unit, valueColumns }: { rows: RowsData; unit
                   const value = numeric[j] && typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : v;
                   const isNum = numeric[j] || typeof value === "number";
                   return (
-                    <td key={j} className={`px-3 py-1.5 whitespace-nowrap ${isNum || temporal[j] ? "tabular-nums" : ""} ${isNum ? "text-right" : ""}`}>
+                    <td key={j} className={`px-2.5 py-1.5 whitespace-nowrap lg:px-3 ${isNum || temporal[j] ? "tabular-nums" : ""} ${isNum ? "text-right" : ""}`}>
                       {formatValue(value, valueColumns.includes(name) ? unit : "none")}
                     </td>
                   );

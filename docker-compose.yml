@@ -242,8 +242,6 @@ services:
     environment:
       # Read at request time by the /qr and /trace/live server components, never baked into the image (spec 08)
       STAND_PUBLIC_URL: ${STAND_PUBLIC_URL}
-      STAND_WIFI_SSID: ${STAND_WIFI_SSID}
-      STAND_WIFI_PASSWORD: ${STAND_WIFI_PASSWORD}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 10s

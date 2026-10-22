@@ -332,3 +332,16 @@ no other run reached 100% on the 5 suggested questions.
 - The anonymous Grafana can send any read-only SQL as `grafana_ro`, limited by its quota. That's accepted for a demo.
 - ClickHouse grows by roughly 3 GB per wall-clock day at 60×, so a long-running server needs periodic `make reset` or a TTL.
 - Oracle may reclaim an Always Free VM that stays idle for 7 days. A running stack uses about 40 % of its memory, which keeps it above the < 20 % memory threshold.
+
+## ADR-025: `/qr` drops the Wi-Fi code; `/agent` gets a phone layout
+**Status:** accepted · 2026-10-22
+
+**Context:** Since ADR-024 the demo also runs on a public server, where visitors use their own mobile data or any Wi-Fi. The "1. Join Wi-Fi" code on `/qr` is useless there, and it would publish the stand's Wi-Fi password on the internet. Visitors also open `/agent` on their phones now, and the kiosk layout (20 px base, two columns, answer at the bottom) reads badly below 1024 px.
+
+**Decision:**
+- `/qr` shows one code, for `<STAND_PUBLIC_URL>/ride`. The `STAND_WIFI_SSID`/`STAND_WIFI_PASSWORD` settings and `lib/wifi.ts` are gone.
+- Below Tailwind's `lg` (1024 px), `/agent` uses the 16 px phone base and one column: form → answer → steps → SQL → chart and table → suggestions. The kiosk layout at `lg` and up is unchanged.
+
+**Consequences:**
+- At the stand, the Wi-Fi name and password are only on the printed poster and QR card (RUNBOOK).
+- On phones the answer comes before the SQL. The SQL is still on the same page, one scroll away.

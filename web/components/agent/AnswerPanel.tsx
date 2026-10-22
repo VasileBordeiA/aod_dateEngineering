@@ -19,7 +19,7 @@ const FRIENDLY: Record<string, string> = {
   INTERNAL: "Something went wrong on our side. Try again!",
 };
 
-export function AnswerPanel({ state, onRetry }: { state: AgentState; onRetry: () => void }) {
+export function AnswerPanel({ state, onRetry, className = "" }: { state: AgentState; onRetry: () => void; className?: string }) {
   const { answer, error, done, phase } = state;
   if (phase === "idle") return null;
   const footer = done && !error && (done.cached
@@ -27,10 +27,10 @@ export function AnswerPanel({ state, onRetry }: { state: AgentState; onRetry: ()
     : `answered by ${done.model} (${done.provider}) · ${(done.latency_ms / 1000).toFixed(1)} s`);
   return (
     <div data-testid="answer" aria-live="polite"
-      className={`shrink-0 rounded-xl border-2 p-6 ${error && !answer ? "border-amber bg-[#4a3300]/40" : "border-visitor bg-visitor-fill/50"}`}>
-      {answer && <p className="max-w-[60ch] text-[1.75rem] leading-snug font-medium text-visitor-ink">{answer}</p>}
+      className={`shrink-0 rounded-xl border-2 p-4 lg:p-6 ${error && !answer ? "border-amber bg-[#4a3300]/40" : "border-visitor bg-visitor-fill/50"} ${className}`}>
+      {answer && <p className="max-w-[60ch] text-[1.375rem] leading-snug font-medium text-visitor-ink lg:text-[1.75rem]">{answer}</p>}
       {error && (
-        <div className={`flex flex-wrap items-center gap-x-5 gap-y-3 text-[1.5rem] leading-snug text-amber ${answer ? "mt-4" : ""}`}>
+        <div className={`flex flex-wrap items-center gap-x-5 gap-y-3 text-lg leading-snug text-amber lg:text-[1.5rem] ${answer ? "mt-4" : ""}`}>
           <p>
             {error.code === "RATE_LIMITED"
               ? <>Lots of questions right now! <Countdown key={`${state.question}-${error.retry_after_s}`} from={error.retry_after_s ?? 10} /></>
@@ -44,8 +44,8 @@ export function AnswerPanel({ state, onRetry }: { state: AgentState; onRetry: ()
           )}
         </div>
       )}
-      {phase === "running" && !answer && !error && <p className="text-[1.5rem] text-muted">Thinking…</p>}
-      {footer && <p className="mt-4 text-base text-muted">{footer}</p>}
+      {phase === "running" && !answer && !error && <p className="text-lg text-muted lg:text-[1.5rem]">Thinking…</p>}
+      {footer && <p className="mt-3 text-sm text-muted lg:mt-4 lg:text-base">{footer}</p>}
     </div>
   );
 }

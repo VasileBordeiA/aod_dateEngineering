@@ -11,5 +11,10 @@ export default async function AgentPage({ searchParams }: { searchParams: Search
   // /agent?trace_id=…&suggestion=ride_rank comes from the trace viewer's "rank my ride" button (spec 07 §Hand-off).
   const id = typeof sp.trace_id === "string" ? sp.trace_id.toLowerCase() : "";
   const rideTraceId = sp.suggestion === "ride_rank" && isTraceId(id) ? id : undefined;
-  return <AgentKiosk rideTraceId={rideTraceId} />;
+  // .agent switches to the 16 px phone base below lg (globals.css).
+  return (
+    <div className="agent">
+      <AgentKiosk rideTraceId={rideTraceId} />
+    </div>
+  );
 }

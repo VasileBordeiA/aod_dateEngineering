@@ -53,7 +53,7 @@ export async function bookRide(body: RideRequest): Promise<BookResult> {
   try {
     r = await fetch("/api/rides", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   } catch {
-    return { ok: false, status: 0, message: "Can't reach the stand. Are you on the stand Wi-Fi?" };
+    return { ok: false, status: 0, message: "Can't reach the server. Check your connection and try again." };
   }
   if (r.status === 201) return { ok: true, ride: (await r.json()) as RideCreated };
   const data = (await r.json().catch(() => ({}))) as { detail?: unknown; retry_after_s?: number };

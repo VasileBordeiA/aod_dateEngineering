@@ -1,22 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { mockApi } from "./agent-mocks";
 
 // Playwright loads this spec as CommonJS (package.json has no "type": "module"), so __dirname, not import.meta.url.
 const FIXTURE = readFileSync(join(__dirname, "../fixtures/agent-best-tippers.sse"), "utf8");
 const ONESHOT_FIXTURE = readFileSync(join(__dirname, "../fixtures/agent-oneshot-repair.sse"), "utf8");
-const SUGGESTIONS = [
-  { id: "best_tippers", question: "Which borough has the best tippers?" },
-  { id: "busiest_zones_last_hour", question: "What are the 10 busiest pickup zones in the last hour?" },
-];
-
-async function mockApi(page: Page, askBody: string) {
-  await page.route("**/api/suggestions", (r) => r.fulfill({ json: SUGGESTIONS }));
-  await page.route("**/api/llm/status", (r) =>
-    r.fulfill({ json: { providers: [{ name: "local", model: "qwen2.5-coder:14b", healthy: true, last_ok_at: null, p50_ms: 5000 }], order: ["local"], active: "local", mode: "tools" } }));
-  await page.route("**/api/sim/clock", (r) => r.fulfill({ json: { sim_ts: "2025-10-09T17:42:00", speed: 60, paused: false, mode: "live" } }));
-  await page.route("**/api/agent/ask", (r) => r.fulfill({ status: 200, contentType: "text/event-stream", body: askBody }));
-}
 
 test("a suggested question renders steps, both SQL attempts, table, chart and answer", async ({ page }) => {
   await mockApi(page, FIXTURE);
@@ -39,6 +28,20 @@ test("a suggested question renders steps, both SQL attempts, table, chart and an
   await expect(page.locator(".recharts-surface").first()).toBeVisible();
   await expect(page.getByTestId("steps")).toContainText("describe_table(trips)");
   await expect(page.getByTestId("steps")).toContainText("Fixing its own query…");
+});
+
+test("on the stand the kiosk keeps two columns: ask on the left, SQL above the answer on the right", async ({ page }) => {
+  await mockApi(page, FIXTURE);
+  await page.goto("/agent");
+  await page.getByRole("button", { name: "Which borough has the best tippers?" }).click();
+  await expect(page.getByTestId("answer")).toContainText("Manhattan riders tip best");
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe("20px");
+  const form = (await page.getByRole("textbox", { name: "Your question" }).boundingBox())!;
+  const sql = (await page.getByTestId("sql-panel").boundingBox())!;
+  const answer = (await page.getByTestId("answer").boundingBox())!;
+  expect(sql.x).toBeGreaterThan(form.x + form.width);
+  expect(answer.y).toBeGreaterThan(sql.y);
+  await expect(page.getByRole("navigation", { name: "Suggested questions" })).toBeInViewport();
 });
 
 test("oneshot: a failed attempt shows its error line, and the steps list the run_query steps", async ({ page }) => {

@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PHONES = /(ride|trace)\.spec\.ts/;
+const PHONES = /(ride|trace|agent-phone)\.spec\.ts/;
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -16,6 +16,6 @@ export default defineConfig({
     url: "http://127.0.0.1:3100/agent",
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
-    env: { STAND_WIFI_SSID: "Test;Net", STAND_WIFI_PASSWORD: "p@ss", STAND_PUBLIC_URL: "http://192.168.8.10" },
+    env: { STAND_PUBLIC_URL: "http://192.168.8.10" },
   },
 });

@@ -19,7 +19,6 @@ All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form
 ## Config
 - `STAND_PUBLIC_URL` (server-only, **not** `NEXT_PUBLIC_STAND_URL`): read at request time by the `/qr` and `/trace/live` server components (both render `dynamic = "force-dynamic"` for exactly this reason), never baked into the image at build time.
 - `NEXT_PUBLIC_GRAFANA_PATH=/grafana/d/nyc-taxi-live?kiosk&refresh=5s`.
-- `STAND_WIFI_SSID` and `STAND_WIFI_PASSWORD` for the `/qr` Wi-Fi code (read on the server side only, in the `/qr` server component).
 - Dev only: `API_ORIGIN=http://localhost:8000`, used by Next `rewrites` for `/api/*`. `NEXT_PUBLIC_API_WS_ORIGIN` (dev only) points the WebSocket client at `ws://localhost:8000` directly, since `EventSource`/`WebSocket` can't go through the Next rewrite the way `fetch` can. In the stand setup, Caddy serves everything from one origin and this is unset, so the client connects same-origin.
 
 ## Behaviour
@@ -32,7 +31,7 @@ All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form
 | `/ride` | **phone** (from the QR code) | The booking form. See below |
 | `/trace/[id]` | phone | The student's ride moving through the stages |
 | `/trace/live` | tablet or second screen | The wall of recent student rides crossing the pipeline |
-| `/qr` | tablet | Two large QR codes: "1. Join Wi-Fi" (`WIFI:T:WPA;S:…;P:…;;`) and "2. Open `<stand>/ride`" |
+| `/qr` | tablet | One large QR code: "Book a ride at `<stand>/ride`". No Wi-Fi code (ADR-025) |
 
 ### `/agent` layout (kiosk)
 ```
@@ -61,6 +60,11 @@ All visitor-facing screens except Grafana: the agent kiosk, the mobile ride form
 - The model badge comes from `/api/llm/status`: green is local, blue is internal, amber is "cached answers only".
 - Errors are friendly, never raw stack traces. `RATE_LIMITED` shows a countdown.
 - `?trace_id=…&suggestion=ride_rank` preselects the "rank my ride" question and shows a ride chip: "Your ride: Midtown → JFK, $5 tip".
+
+### `/agent` on phones (below 1024 px, ADR-025)
+- 16 px base instead of the kiosk's 20 px. The two columns become one: form → answer → steps → SQL → chart and table. The suggested questions sit under the form until the first question, then move to the end.
+- Asking scrolls back to the top and closes the on-screen keyboard, so the answer is in view.
+- Bar charts are always horizontal on phones, and long category labels wrap instead of overflowing.
 
 ### `/ride` (mobile-first, 360 px minimum width)
 1. **Pickup zone** and **Dropoff zone**: a searchable combobox grouped by borough. A "Popular" row offers JFK Airport, LaGuardia Airport, Times Sq/Theatre District, Midtown Center, East Village, Williamsburg (North Side).
@@ -120,7 +124,7 @@ The frontend has no analytics or tracking. The `/agent` footer shows the provide
 ## Acceptance criteria
 1. Playwright (iPhone 13 and Pixel 7 viewports) with a mocked API: book a ride and see all 7 stages render in order. The rejected path shows the amber card and stops.
 2. Playwright on `/agent` with a recorded SSE fixture: the SQL panel, the table, the chart, and the answer all render. Failed attempts show struck-through. The idle reset triggers at 90 s (fake timers).
-3. No horizontal scroll at 360 px on `/ride` and `/trace/[id]`.
+3. No horizontal scroll at 360 px on `/ride`, `/trace/[id]` and `/agent`.
 4. The `/ride` first-load JS is ≤ 150 kB gzipped. Lighthouse mobile performance is ≥ 90 on the stand network.
 5. Unit tests for the SSE parser: chunked frames, multi-line data, and a stream ending without a trailing newline.
 6. Types are generated from `contracts/` and compile. Changing a contract field breaks `pnpm typecheck`.

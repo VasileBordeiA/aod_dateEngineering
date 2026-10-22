@@ -95,7 +95,7 @@ rsync -az --progress \
   ./ ubuntu@<PUBLIC_IP>:~/nyctaxi/
 ```
 
-To update the server after changing code later, run the same command again, then step 6.
+To update the server after changing code later, see [Update after a code change](#update-after-a-code-change).
 
 ## 5. Configure `.env` on the server
 
@@ -166,6 +166,22 @@ Open these from your phone or laptop:
 3. Run `make up`.
    - Caddy gets a Let's Encrypt certificate on its own, which takes a few seconds. It keeps the certificate in the `caddy-data` volume.
    - Plain `http://` requests are redirected to `https://`. The agent's streaming and the trace WebSockets switch to `wss://` automatically.
+
+## Update after a code change
+
+Run this on your Mac. It's the step 4 command plus `--exclude .env`, so the server keeps its own `.env` (Gemini, `STAND_PUBLIC_URL`) and your company credentials never leave the laptop:
+
+```bash
+cd ~/Desktop/learning/aod_dataEngineering
+rsync -az --progress \
+  --exclude .git --exclude .venv --exclude node_modules --exclude .next \
+  --exclude __pycache__ --exclude .pytest_cache --exclude .mypy_cache --exclude .ruff_cache \
+  --exclude data/raw --exclude data/state --exclude .env \
+  ./ ubuntu@<PUBLIC_IP>:~/nyctaxi/
+ssh ubuntu@<PUBLIC_IP> 'cd ~/nyctaxi && make up'
+```
+
+`make up` rebuilds only the images whose files changed, then waits until every container is healthy. rsync doesn't delete files you removed locally. They're harmless, but you can `rm` them on the server.
 
 ## Day-to-day
 

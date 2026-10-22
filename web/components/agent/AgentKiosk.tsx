@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { askAgent, getSuggestions, type Suggestion } from "@/lib/api";
 import { initialState, reduce } from "@/lib/agent-state";
+import { STAND_SCREEN } from "@/lib/use-media-query";
 import { AnswerPanel } from "./AnswerPanel";
 import { AskForm } from "./AskForm";
 import { AttractScreen } from "./AttractScreen";
@@ -54,6 +55,11 @@ export function AgentKiosk({ rideTraceId }: { rideTraceId?: string } = {}) {
     abort.current = controller;
     last.current = { question, opts };
     dispatch({ type: "start", question });
+    // Phones: the answer sits right under the form, and the visitor may have tapped a suggestion further down.
+    if (!window.matchMedia(STAND_SCREEN).matches) {
+      const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.scrollTo({ top: 0, behavior: still ? "instant" : "smooth" });
+    }
     try {
       const origin = opts.rideTraceId ? "ride" : opts.suggestionId ? "suggested" : "typed";
       for await (const event of askAgent({ question, origin, suggestion_id: opts.suggestionId, trace_id: opts.rideTraceId }, controller.signal)) {
@@ -86,23 +92,28 @@ export function AgentKiosk({ rideTraceId }: { rideTraceId?: string } = {}) {
   // A wide result (3+ columns) gets half the row next to the chart instead of two fifths.
   const split = (state.rows?.columns.length ?? 0) > 2 ? "xl:grid-cols-2" : "xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]";
   // On the stand (lg+) the page is exactly one screen. The chart and the answer keep their height;
-  // the SQL panel gives up height first and scrolls inside. Phones get a normal scrolling column.
+  // the SQL panel gives up height first and scrolls inside.
+  // Below lg both sections dissolve (display: contents) into one scrolling column, reordered for a phone:
+  // form, answer, steps, SQL, chart and table. The suggestions go last once a question is asked.
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
       <Header />
       {offline && (
-        <div data-testid="offline" role="status" className="bg-amber px-6 py-2 text-center text-lg font-medium text-black">
+        <div data-testid="offline" role="status" className="bg-amber px-4 py-2 text-center text-base font-medium text-black lg:px-6 lg:text-lg">
           Reconnecting to the pipeline…
         </div>
       )}
-      <main className="grid flex-1 grid-cols-1 gap-6 p-6 lg:min-h-0 lg:grid-cols-[minmax(0,5fr)_minmax(0,8fr)]">
-        <section aria-label="Ask" className="flex min-w-0 flex-col gap-5 lg:min-h-0 lg:overflow-y-auto">
-          {rideTraceId && <RidePrompt traceId={rideTraceId} onAsk={() => void ask(RIDE_RANK_QUESTION, { rideTraceId })} />}
-          <AskForm busy={running} onAsk={(q) => void ask(q)} />
-          <SuggestionList suggestions={suggestions} onPick={(s) => void ask(s.question, { suggestionId: s.id })} />
+      <main className="grid flex-1 grid-cols-1 content-start gap-5 p-4 lg:min-h-0 lg:grid-cols-[minmax(0,5fr)_minmax(0,8fr)] lg:content-normal lg:gap-6 lg:p-6">
+        <section aria-label="Ask" className="contents min-w-0 flex-col gap-5 lg:flex lg:min-h-0 lg:overflow-y-auto">
+          <div className="order-first flex min-w-0 flex-col gap-5 lg:order-none">
+            {rideTraceId && <RidePrompt traceId={rideTraceId} onAsk={() => void ask(RIDE_RANK_QUESTION, { rideTraceId })} />}
+            <AskForm busy={running} onAsk={(q) => void ask(q)} />
+          </div>
+          <SuggestionList suggestions={suggestions} onPick={(s) => void ask(s.question, { suggestionId: s.id })}
+            className={state.phase === "idle" ? "" : "order-last lg:order-none"} />
           <StepTimeline steps={state.steps} running={running} startedKey={state.question} />
         </section>
-        <section aria-label="What the AI did" className="flex min-w-0 flex-col gap-5 lg:min-h-0 lg:overflow-y-auto">
+        <section aria-label="What the AI did" className="contents min-w-0 flex-col gap-5 lg:flex lg:min-h-0 lg:overflow-y-auto">
           <SqlPanel attempts={state.attempts} />
           {state.rows && (
             <div className={`grid min-w-0 shrink-0 gap-5 ${showChart ? split : ""}`}>
@@ -110,7 +121,7 @@ export function AgentKiosk({ rideTraceId }: { rideTraceId?: string } = {}) {
               <ResultTable rows={state.rows} unit={state.chart?.unit} valueColumns={state.chart?.y ?? []} />
             </div>
           )}
-          <AnswerPanel state={state} onRetry={retry} />
+          <AnswerPanel state={state} onRetry={retry} className="order-first lg:order-none" />
         </section>
       </main>
     </div>
