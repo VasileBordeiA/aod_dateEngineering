@@ -24,6 +24,13 @@ def test_candidates_follow_order_and_health():
     assert [llm.name for llm in p.candidates()] == ["local", "internal"]  # one success is
 
 
+def test_llm_carries_the_json_mode_setting():
+    fakes = {"local": FakeLLM(), "internal": FakeLLM()}
+    gateway = ProviderConfig("internal", "http://fake-gw/v1", "k", "gpt", json_mode=False)
+    p = ProviderPool([LOCAL, gateway], ("local", "internal"), lambda pc: fakes[pc.name].client())
+    assert [(llm.name, llm.json_mode) for llm in p.candidates()] == [("local", True), ("internal", False)]
+
+
 def test_set_order_live_and_validation():
     p, _ = pool()
     p.set_order(["internal", "local"])

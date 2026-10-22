@@ -21,7 +21,9 @@ def test_messages_without_and_with_ride_context():
     line = ride_context("00000000-0000-0000-0000-000000000001")
     assert "trace_id = '00000000-0000-0000-0000-000000000001'" in line
     msgs = build_messages("Where does my ride rank?", line)
-    assert [m["role"] for m in msgs] == ["system", "system", "user"] and msgs[1]["content"] == line
+    # one leading system message: LiteLLM/vLLM gateways reject a later one ("System message must be at the beginning")
+    assert msgs == [{"role": "system", "content": f"{SYSTEM_PROMPT}\n\n{line}"},
+                    {"role": "user", "content": "Where does my ride rank?"}]
 
 
 def test_ride_context_explains_the_tip_rank_and_the_cash_caveat():

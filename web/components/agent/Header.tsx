@@ -6,6 +6,7 @@ import { usePoll } from "@/lib/use-poll";
 const BADGE: Record<string, { label: string; className: string; dot: string }> = {
   local: { label: "local model", className: "bg-visitor-fill text-visitor-ink border-visitor", dot: "bg-visitor" },
   internal: { label: "company AI", className: "bg-[#0d3a66] text-[#dcecff] border-[#3987e5]", dot: "bg-[#3987e5]" },
+  gemini: { label: "Google Gemini", className: "bg-[#0d3a66] text-[#dcecff] border-[#3987e5]", dot: "bg-[#3987e5]" },
   cache: { label: "cached answers only", className: "bg-[#4a3300] text-[#ffe7b0] border-amber", dot: "bg-amber" },
 };
 

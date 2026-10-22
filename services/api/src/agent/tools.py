@@ -191,7 +191,9 @@ class Toolbox:
         problems = []
         if chart_type not in CHART_TYPES:
             problems.append(f"type must be one of {', '.join(CHART_TYPES)}")
-        if not 1 <= len(y_list) <= 3:
+        if not y_list:
+            problems.append("y must list at least 1 column")
+        elif chart_type != "table" and len(y_list) > 3:  # no chart is drawn for a table: the UI shows every column
             problems.append("y must list 1 to 3 columns")
         for column in [x, *y_list, *([series] if series else [])]:
             if column not in columns:

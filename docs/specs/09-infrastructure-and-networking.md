@@ -83,7 +83,7 @@ All keys are in `.env` (template: [.env.example](../../.env.example)). `make sec
 | `replayer` | built from `services/replayer` | redpanda-init (completed), processor (healthy) | heartbeat file + `GET :8001/status` | 512 m | `./data/replay` ro, `replayer-state:/data/state` |
 | `api` | built from `services/api` | redpanda-init, clickhouse (healthy) | `GET /api/healthz` (checks ClickHouse + broker, **not** the LLM) | 512 m | `./evals` ro |
 | `web` | built from `web/` (Next standalone) | api (healthy) | `GET /` | 512 m | n/a |
-| `caddy` | `caddy:<pin>` | web, api, grafana (healthy) | n/a | 128 m | `./infra/caddy/Caddyfile` ro |
+| `caddy` | `caddy:<pin>` | web, api, grafana (healthy) | n/a | 128 m | `./infra/caddy/Caddyfile` ro, `caddy-data:/data` |
 
 - All long-running services use `restart: unless-stopped`.
 - `api` gets `extra_hosts: ["host.docker.internal:host-gateway"]` to reach native Ollama.
@@ -101,7 +101,11 @@ Live mode continues from the saved state (spec 01).
 
 ### Caddy (`infra/caddy/Caddyfile`)
 ```caddyfile
-:80 {
+{$SITE_ADDRESS::80} {
+    # Admin endpoints are operator-only: `make llm` calls the api on 127.0.0.1:8000 directly
+    handle /api/admin/* {
+        respond 404
+    }
     # Agent SSE and trace WebSockets: never buffer
     handle /api/* {
         reverse_proxy api:8000 {
@@ -118,6 +122,7 @@ Live mode continues from the saved state (spec 01).
     }
 }
 ```
+- `SITE_ADDRESS` (compose default `:80`) is plain HTTP for the stand LAN. A hostname turns on Caddy's automatic HTTPS for a public server (ADR-024, [DEPLOY_ORACLE](../DEPLOY_ORACLE.md)). Port 443 is published, and the `caddy-data` volume keeps the certificates.
 - Don't enable `encode` on `/api/*`, because compression can buffer SSE.
 - Caddy sets `X-Forwarded-For`. The api runs uvicorn with `--proxy-headers --forwarded-allow-ips=*`, which is safe because only Caddy can reach it.
 

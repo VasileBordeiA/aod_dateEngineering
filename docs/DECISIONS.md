@@ -291,3 +291,44 @@ no other run reached 100% on the 5 suggested questions.
 **Consequences:**
 - There's no automated long-run evidence, so the risks R4 (ClickHouse parts/memory growth) and R9 (replayer loop boundary) are now covered only by a manual long run, watched with `make status` and Stand Health.
 - ADR-018's "watch in the soak" item now means "watch in the manual long run".
+
+## ADR-022: JSON mode is a per-provider switch (`LLM_{NAME}_JSON_MODE`)
+**Status:** accepted · 2026-10-22
+
+**Context:** The company AI gateway (internal provider, `qwen3.8-27b`, a reasoning model) corrupts oneshot's `response_format={"type":"json_object"}` replies about 2 times in 3: `{"{"sql": …` and `{{"sql": …`. The agent then reports `LLM_UNAVAILABLE`. On the same prompts without `response_format`, the model returned valid JSON 3 out of 3 times. The local Ollama model's 5/5 eval (ADR-018) was measured with JSON mode on.
+
+**Decision:** Add `LLM_LOCAL_JSON_MODE` and `LLM_INTERNAL_JSON_MODE` (`true`/`false`, default `true`). When it's `false`, oneshot sends no `response_format` for that provider, and only the system prompt asks for JSON. The template sets internal to `false`.
+
+**Consequences:**
+- The local fallback is unchanged.
+- A non-JSON reply from a provider without JSON mode is still a `ProviderFailed` ("the oneshot reply was not JSON"), so failover works as before.
+- The same gateway (LiteLLM) rejects a second system message with HTTP 400 "System message must be at the beginning", which broke the ride hand-off. The ride context is now appended to the one system message (spec 06).
+- `make eval MODEL=qwen3.8-27b PROVIDER=internal` (2026-10-22): **75 %** (24/32), suggested **4/5**, refusals pass, p50 9.9 s / p95 30.0 s. The 3 timeouts at `LLM_TIMEOUT_S=30` (`rejected_why`, which was answered from the cache, plus `busiest_minute_last_hour` and `ride_rank`) cause the p95 miss. For comparison, ADR-018's local baseline: 80 %, 5/5, p95 12.5 s.
+
+## ADR-023: Google Gemini (free tier) as a third provider slot
+**Status:** accepted · 2026-10-22
+
+**Context:** The owner wants a publicly hosted demo, where neither the local Ollama model nor the company gateway is available. Gemini has an OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai/`) with `GET /models`, so it fits ADR-007's `{base_url, api_key, model}` providers without a new client.
+
+**Decision:** Add a `gemini` provider (`LLM_GEMINI_{BASE_URL,API_KEY,MODEL,JSON_MODE}`), disabled when its base URL is blank. `json_object` isn't documented for that endpoint, so the template sets `LLM_GEMINI_JSON_MODE=false` (ADR-022). The `/agent` header shows "Google Gemini" when it's active. `LLM_ORDER` stays `local,internal` by default, and a hosted deployment sets it to `gemini`.
+
+**Consequences:**
+- The owner chose the **free tier** for this demo, knowing its terms. Google may use free-tier prompts and responses to improve its products, with human review. The terms allow only Paid Services for API clients offered to EEA, Swiss or UK users. They also bar clients likely to be accessed by under-18s.
+- Free-tier quotas are per project and visible only in AI Studio. When they run out (HTTP 429), suggested questions fall back to the cached reference SQL, and typed questions get `LLM_UNAVAILABLE`.
+- Running with only `gemini` gives up ADR-007's offline-first property for that deployment.
+
+## ADR-024: A public demo server on Oracle Cloud Always Free
+**Status:** accepted · 2026-10-22
+
+**Context:** The owner wants the demo reachable from the internet, for free. On 2026-10-22, Oracle's Always Free Ampere A1 allowance was 2 OCPUs and 12 GB of RAM, with 200 GB of block storage. Without Ollama the stack uses about 4.7 GB. All of its own images already build as arm64 (the stand laptop is Apple silicon).
+
+**Decision:**
+- Run the same Compose stack on one A1 VM (Ubuntu), with `LLM_ORDER=gemini` (ADR-023). The steps are in [DEPLOY_ORACLE](DEPLOY_ORACLE.md).
+- Caddy's site address comes from `SITE_ADDRESS`. The default `:80` keeps the stand unchanged, and a hostname gives automatic HTTPS.
+- Caddy now answers `/api/admin/*` with 404. `make llm` reaches the api on `127.0.0.1:8000` directly.
+
+**Consequences:**
+- The public server has no offline fallback. When Gemini is unavailable, only the 5 suggested questions answer, from the cache.
+- The anonymous Grafana can send any read-only SQL as `grafana_ro`, limited by its quota. That's accepted for a demo.
+- ClickHouse grows by roughly 3 GB per wall-clock day at 60×, so a long-running server needs periodic `make reset` or a TTL.
+- Oracle may reclaim an Always Free VM that stays idle for 7 days. A running stack uses about 40 % of its memory, which keeps it above the < 20 % memory threshold.

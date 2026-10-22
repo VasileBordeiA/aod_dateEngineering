@@ -144,9 +144,11 @@ async def test_ride_context_only_for_a_known_uuid():
     svc, _, fakes, _ = make({"local": [say("ok"), say("ok")]})
     await ask(svc, "Where does my ride rank?", origin="ride", trace_id="00000000-0000-0000-0000-000000000001")
     msgs = fakes["local"].requests[0]["messages"]
-    assert msgs[1]["role"] == "system" and "00000000-0000-0000-0000-000000000001" in msgs[1]["content"]
+    assert [m["role"] for m in msgs] == ["system", "user"]
+    assert "00000000-0000-0000-0000-000000000001" in msgs[0]["content"]
     await ask(svc, "Where does my ride rank?", origin="ride", trace_id="'; DROP TABLE taxi.trips; --")
-    assert [m["role"] for m in fakes["local"].requests[1]["messages"]] == ["system", "user"]
+    msgs = fakes["local"].requests[1]["messages"]
+    assert [m["role"] for m in msgs] == ["system", "user"] and "DROP" not in msgs[0]["content"]
 
 
 async def test_queue_status_while_waiting(monkeypatch):

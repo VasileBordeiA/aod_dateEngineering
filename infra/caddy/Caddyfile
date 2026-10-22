@@ -1,4 +1,10 @@
-:80 {
+# SITE_ADDRESS: ":80" on the stand (plain HTTP on the LAN). A hostname such as
+# "demo.example.org" turns on automatic HTTPS for a public server (docs/DEPLOY_ORACLE.md).
+{$SITE_ADDRESS::80} {
+	# Admin endpoints are for the operator only: `make llm` calls the api on 127.0.0.1:8000 directly
+	handle /api/admin/* {
+		respond 404
+	}
 	# Agent SSE (and trace WebSockets in M4): never buffer, never compress
 	handle /api/* {
 		reverse_proxy api:8000 {

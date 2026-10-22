@@ -13,7 +13,7 @@ from typing import Any
 
 from agent.catalog import Catalog
 from agent.loop import FIXING, NO_WORKING_QUERY, LoopResult, ProviderFailed, chat, clean_answer, traced_call
-from agent.prompt import ONESHOT_ANSWER, oneshot_system
+from agent.prompt import ONESHOT_ANSWER, oneshot_system, system_message
 from agent.providers import LLM
 from agent.tools import LLM_ROWS, Emit, Toolbox
 
@@ -22,7 +22,9 @@ FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.I)
 
 
 async def _plan(llm: LLM, messages: list[dict[str, Any]], temperature: float) -> dict[str, Any]:
-    message = await chat(llm, messages, temperature=temperature, response_format={"type": "json_object"})
+    # JSON mode is per provider: some gateways corrupt it on reasoning models, and the prompt asks for JSON anyway.
+    response_format = {"type": "json_object"} if llm.json_mode else None
+    message = await chat(llm, messages, temperature=temperature, response_format=response_format)
     text = FENCE.sub("", clean_answer(message.content))
     try:
         plan = json.loads(text)
@@ -36,10 +38,8 @@ async def _plan(llm: LLM, messages: list[dict[str, Any]], temperature: float) ->
 async def run_oneshot(llm: LLM, question: str, ride_line: str | None, toolbox: Toolbox, catalog: Catalog, emit: Emit, *,
                       temperature: float) -> LoopResult:
     await emit("status", {"text": ONESHOT_STATUS})
-    messages: list[dict[str, Any]] = [{"role": "system", "content": oneshot_system(await catalog.schema_text())}]
-    if ride_line:
-        messages.append({"role": "system", "content": ride_line})
-    messages.append({"role": "user", "content": question})
+    messages: list[dict[str, Any]] = [system_message(oneshot_system(await catalog.schema_text()), ride_line),
+                                      {"role": "user", "content": question}]
     result = LoopResult(iterations=1)
     step_ids = (f"oneshot_{n}" for n in itertools.count(1))
     plan = await _plan(llm, messages, temperature)

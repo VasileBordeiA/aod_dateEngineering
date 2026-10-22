@@ -147,8 +147,11 @@ services:
       grafana: { condition: service_healthy }
       api: { condition: service_healthy }
       web: { condition: service_healthy }
-    ports: ["0.0.0.0:80:80"]
-    volumes: ["./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"]
+    ports: ["0.0.0.0:80:80", "0.0.0.0:443:443"]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    # caddy-data keeps HTTPS certificates across restarts (only used when SITE_ADDRESS is a hostname)
+    volumes: ["./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro", "caddy-data:/data"]
     mem_limit: 128m
     restart: unless-stopped
     logging: *logging
@@ -252,6 +255,7 @@ services:
     logging: *logging
 
 volumes:
+  caddy-data:
   redpanda-data:
   clickhouse-data:
   processor-state:

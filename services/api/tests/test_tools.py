@@ -83,6 +83,24 @@ async def test_truncated_when_safety_limit_hit():
     assert len(json.loads(out.content)["rows"]) == 50
 
 
+async def test_table_chart_may_list_more_than_three_columns():
+    # The UI draws no chart for a table (the result table shows every column), so the 3-column cap is for bar/line.
+    wide = Result([(c, "Float64") for c in ("trip_type", "trips", "avg_fare", "avg_total", "avg_miles")],
+                  [["Airport", 12575, 59.26, 81.8, 13.02]], 38)
+    tb, rec = toolbox(FakeDb({"SELECT * FROM (": wide}))
+    await tb.call("run_query", json.dumps({"sql": "SELECT 1 FROM trips", "purpose": "x"}), rec)
+    y = ["trips", "avg_fare", "avg_total", "avg_miles"]
+    bar = await tb.call("render_chart", json.dumps({"type": "bar", "x": "trip_type", "y": y, "title": "t"}), rec)
+    assert not bar.ok and "1 to 3" in json.loads(bar.content)["error"]
+    table = await tb.call("render_chart", json.dumps({"type": "table", "x": "trip_type", "y": y, "title": "t"}), rec)
+    assert table.ok and rec.events[-1][1]["y"] == y
+    tb, rec = toolbox(FakeDb({"SELECT * FROM (": wide}))
+    await tb.call("run_query", json.dumps({"sql": "SELECT 1 FROM trips", "purpose": "x"}), rec)
+    missing = await tb.call("render_chart", json.dumps({"type": "table", "x": "trip_type", "y": ["nope"], "title": "t"}),
+                            rec)
+    assert not missing.ok and "nope" in json.loads(missing.content)["error"]
+
+
 async def test_render_chart_validates_columns_and_runs_once():
     tb, rec = toolbox()
     no_result = await tb.call(

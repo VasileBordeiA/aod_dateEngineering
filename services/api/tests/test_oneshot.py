@@ -26,14 +26,14 @@ class Recorder:
         self.events.append((event, data))
 
 
-async def run(script):
+async def run(script, json_mode=True, ride_line=None):
     fake = FakeLLM(script)
     db = FakeDb({"system.tables": Result([("name", "String"), ("comment", "String")], [["trips", "Trips."]], 1),
                  "DESCRIBE TABLE": Result([("name", "String"), ("type", "String"), ("comment", "String")],
                                           [["tip_pct", "Float32", "Card only."]], 1),
                  "LIMIT 3": Result([("tip_pct", "Float32")], [[1.0]], 1), "SELECT * FROM (": TIPS})
     rec = Recorder()
-    result = await run_oneshot(LLM("local", "fake", fake.client()), "Which borough tips best?", None,
+    result = await run_oneshot(LLM("local", "fake", fake.client(), json_mode), "Which borough tips best?", ride_line,
                                Toolbox(db, Catalog(db)), Catalog(db), rec, temperature=0.0)
     return result, rec, fake
 
@@ -53,6 +53,20 @@ async def test_happy_path():
     assert first["response_format"] == {"type": "json_object"} and "tools" not in first
     assert "taxi.trips" in first["messages"][0]["content"] and "Card only." in first["messages"][0]["content"]
     assert "Manhattan" in fake.requests[1]["messages"][-1]["content"]
+
+
+async def test_json_mode_off_sends_no_response_format():
+    # Some gateways corrupt JSON mode on reasoning models ('{"{"sql": …'); the prompt alone asks for JSON.
+    result, _, fake = await run([say("\n\n" + json.dumps(PLAN)), say("Manhattan tips best.")], json_mode=False)
+    assert result.answer == "Manhattan tips best."
+    assert "response_format" not in fake.requests[0]
+
+
+async def test_ride_line_joins_the_leading_system_message():
+    _, _, fake = await run([say(json.dumps(PLAN)), say("Your ride tips above average.")], ride_line="RIDE LINE")
+    msgs = fake.requests[0]["messages"]
+    assert [m["role"] for m in msgs] == ["system", "user"]
+    assert "taxi.trips" in msgs[0]["content"] and msgs[0]["content"].endswith("\n\nRIDE LINE")
 
 
 async def test_off_topic_answer_without_sql():

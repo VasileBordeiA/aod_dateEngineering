@@ -19,6 +19,20 @@ def test_provider_with_empty_base_url_is_disabled():
     assert [p.name for p in both.providers] == ["local", "internal"]
 
 
+def test_gemini_is_a_third_provider_slot():
+    cfg = make_config(LLM_GEMINI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/",
+                      LLM_GEMINI_API_KEY="g", LLM_GEMINI_MODEL="gemini-2.5-flash", LLM_GEMINI_JSON_MODE="false")
+    assert [(p.name, p.model, p.json_mode) for p in cfg.providers] == [
+        ("local", "fake-local", True), ("gemini", "gemini-2.5-flash", False)]
+
+
+def test_json_mode_is_per_provider_and_defaults_on():
+    both = make_config(LLM_INTERNAL_BASE_URL="https://gw/v1", LLM_INTERNAL_MODEL="m", LLM_INTERNAL_JSON_MODE="False")
+    assert [(p.name, p.json_mode) for p in both.providers] == [("local", True), ("internal", False)]
+    with pytest.raises(ValueError, match="LLM_LOCAL_JSON_MODE"):
+        make_config(LLM_LOCAL_JSON_MODE="no")
+
+
 def test_rejects_unknown_mode():
     with pytest.raises(ValueError, match="AGENT_MODE"):
         make_config(AGENT_MODE="magic")

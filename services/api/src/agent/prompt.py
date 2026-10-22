@@ -43,12 +43,13 @@ def ride_context(trace_id: str) -> str:
     )
 
 
+def system_message(prompt: str, ride_line: str | None) -> dict[str, Any]:
+    """The one system message. LiteLLM/vLLM gateways reject a second one ("System message must be at the beginning")."""
+    return {"role": "system", "content": f"{prompt}\n\n{ride_line}" if ride_line else prompt}
+
+
 def build_messages(question: str, ride_line: str | None) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    if ride_line:
-        messages.append({"role": "system", "content": ride_line})
-    messages.append({"role": "user", "content": question})
-    return messages
+    return [system_message(SYSTEM_PROMPT, ride_line), {"role": "user", "content": question}]
 
 
 # Oneshot mode (spec 06): the schema lives in the prompt, and a single JSON answer comes back.

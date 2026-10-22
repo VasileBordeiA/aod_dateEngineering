@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-PROVIDER_NAMES = ("local", "internal")
+PROVIDER_NAMES = ("local", "internal", "gemini")
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,7 @@ class ProviderConfig:
     base_url: str
     api_key: str
     model: str
+    json_mode: bool = True  # oneshot sends response_format=json_object; some gateways corrupt it (spec 06)
 
 
 @dataclass(frozen=True)
@@ -61,9 +62,15 @@ class Config:
                 raise ValueError(f"missing env var {key}")
             return value
 
+        def flag(key: str, default: str) -> bool:
+            value = get(key, default).strip().lower()
+            if value not in ("true", "false"):
+                raise ValueError(f"{key} must be 'true' or 'false', got {value!r}")
+            return value == "true"
+
         providers = tuple(
             ProviderConfig(name, get(f"LLM_{name.upper()}_BASE_URL", ""), get(f"LLM_{name.upper()}_API_KEY", ""),
-                           get(f"LLM_{name.upper()}_MODEL", ""))
+                           get(f"LLM_{name.upper()}_MODEL", ""), flag(f"LLM_{name.upper()}_JSON_MODE", "true"))
             for name in PROVIDER_NAMES
             if get(f"LLM_{name.upper()}_BASE_URL", "").strip()
         )

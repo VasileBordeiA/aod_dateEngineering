@@ -28,6 +28,7 @@ class LLM:
     name: str
     model: str
     client: AsyncOpenAI
+    json_mode: bool = True
 
 
 def openai_client(pc: ProviderConfig, timeout_s: float) -> AsyncOpenAI:
@@ -51,7 +52,7 @@ class ProviderPool:
         factory: Callable[[ProviderConfig], AsyncOpenAI],
         clock: Callable[[], float] = time.time,
     ) -> None:
-        self._states = {pc.name: _State(LLM(pc.name, pc.model, factory(pc))) for pc in configs}
+        self._states = {pc.name: _State(LLM(pc.name, pc.model, factory(pc), pc.json_mode)) for pc in configs}
         self._order = [name for name in order if name in self._states]
         self._clock = clock
 
